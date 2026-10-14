@@ -1,0 +1,29 @@
+# Task: フェーズ4 - BOM連動型・動的市場、控え部隊自動派遣、GvGリベンジ検証
+
+- [x] ドキュメント整備と初期設計 <!-- id: 0 -->
+    - [x] `docs/market_dispatch/task.md` の作成 <!-- id: 1 -->
+    - [x] `docs/market_dispatch/implementation_plan.md` の作成 <!-- id: 2 -->
+    - [x] `agent.md` の更新 <!-- id: 3 -->
+- [x] BOM連動型・動的市場システムの実装 (`src/market.rs`) <!-- id: 4 -->
+    - [x] 市場アイテム (`MarketItem`) とダイナミックプライシング計算式（0.3〜3.0倍キャップ） <!-- id: 5 -->
+    - [x] BOM（部品表）レシピ定義と、完成品購入時のプル型素材在庫枯渇連鎖 <!-- id: 6 -->
+    - [x] 市場売買処理（購入・売却・自然回復・特需イベント） <!-- id: 7 -->
+- [x] 控え部隊の自動派遣システムの実装 (`src/dispatch.rs`) <!-- id: 8 -->
+    - [x] 派遣先（廃鉱山、薬草園）と獲得素材・消耗品消費の定義 <!-- id: 9 -->
+    - [x] 部隊シナジー（アタッカー＋支援＋商人: 黄金トリオ）による素材増量＆消耗品節約 <!-- id: 10 -->
+    - [x] 派遣サイクルの実行と収支集計 <!-- id: 11 -->
+- [x] 対ライバル用ガンビット・スキル・装備拡張 (`src/models.rs`, `src/engine.rs`, `mods/core/skills.ron`) <!-- id: 12 -->
+    - [x] 高DEF/VIT特効（錐効果スキル `vital_strike`）および緊急回復（`sanctuary_heal`）の追加 <!-- id: 13 -->
+    - [x] ガンビット条件・アクション拡張（`Condition::TargetVitAbove(threshold)`） <!-- id: 14 -->
+    - [x] 街のNPC化バフ（`TownPassiveBonus`）のGvG戦闘オーラへの自動反映 <!-- id: 15 -->
+- [x] 4ステップ検証シナリオの実装 (`src/main.rs`) <!-- id: 16 -->
+    - [x] Step 1: BOM連動市場での買い占めと一次素材急騰テーブルの出力 <!-- id: 17 -->
+    - [x] Step 2: 自動派遣部隊による高騰素材採掘と自作自演の高額売却（市場ハック） <!-- id: 18 -->
+    - [x] Step 3: クホホ工場での決戦武器精錬＆第6世代対タンク特化エースのセルフ養殖 <!-- id: 19 -->
+    - [x] Step 4: 宿敵『黒曜の旅団』への模擬GvGリベンジマッチと劇的勝利 <!-- id: 20 -->
+    - [x] 3つの出力サマリー（BOM変動、派遣収支、GvG雪辱戦比較） <!-- id: 21 -->
+- [x] 検証とコミット <!-- id: 22 -->
+    - [x] `cargo check`, `cargo test`, `cargo run` での正常動作確認 <!-- id: 23 -->
+    - [x] `docs/market_dispatch/walkthrough.md` の作成 <!-- id: 24 -->
+    - [x] `agent.md`, `README_DEV.md` の更新 <!-- id: 25 -->
+    - [x] git commit & git push <!-- id: 26 -->

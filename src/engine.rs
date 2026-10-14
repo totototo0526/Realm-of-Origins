@@ -269,14 +269,15 @@ impl<'a> SimulationEngine<'a> {
             }
         }
 
-        // 2. HP計算
+        // 2. HP計算（レベルとVITに応じた自然なHP成長）
         let (base_hp, hp_factor, base_aspd) = if let Some(job) = self.db.jobs.get(&character.job_id) {
             (job.base_hp, job.hp_factor, job.base_aspd)
         } else {
             (1000, 1.0, 150.0)
         };
+        let lvl_factor = 1.0 + (character.level as f32 * 0.035);
         let vit_hp_bonus = 1.0 + (effective_stats.vit as f32 * 0.01);
-        let max_hp = ((base_hp as f32) * vit_hp_bonus * hp_factor).round() as u32;
+        let max_hp = ((base_hp as f32) * lvl_factor * vit_hp_bonus * hp_factor).round() as u32;
 
         // 3. ATK計算（STR二乗ボーナス + 精錬ボーナス）
         let str_val = effective_stats.str_stat as u32;
@@ -457,6 +458,9 @@ impl<'a> SimulationEngine<'a> {
                             Condition::TargetRaceIs(race) => monster.race == *race,
                             Condition::SelfHpBelow(ratio) => {
                                 (c_stats.current_hp as f32 / c_stats.max_hp as f32) < *ratio
+                            }
+                            Condition::TargetVitAbove(threshold) => {
+                                (monster.stats.vit as u32) >= *threshold
                             }
                             Condition::Always => true,
                         };
@@ -784,9 +788,11 @@ impl<'a> SimulationEngine<'a> {
         team_b: &[Character],
         name_a: &str,
         name_b: &str,
+        town_bonus_a: Option<crate::guild::TownPassiveBonus>,
     ) -> GvgResult {
         let mut rng = rand::thread_rng();
-        let weapon_mult_a = self.calculate_party_weapon_multiplier(team_a);
+        let town_atk_bonus = town_bonus_a.as_ref().map(|b| b.extra_weapon_atk_percent).unwrap_or(0.0);
+        let weapon_mult_a = self.calculate_party_weapon_multiplier(team_a) + town_atk_bonus;
         let weapon_mult_b = self.calculate_party_weapon_multiplier(team_b);
 
         let mut combatants_a: Vec<Combatant> = team_a
@@ -826,6 +832,12 @@ impl<'a> SimulationEngine<'a> {
             name_a, ((weapon_mult_a - 1.0) * 100.0).round(),
             name_b, ((weapon_mult_b - 1.0) * 100.0).round()
         ));
+        if let Some(tb) = &town_bonus_a {
+            logs.push(format!(
+                "   🏛️ [街NPC古参バフ] 初代鍛冶屋の鍛錬支援: 『{}』の武器ATK +{:.1}% 加算！",
+                name_a, tb.extra_weapon_atk_percent * 100.0
+            ));
+        }
 
         let mut current_tick = 0u32;
 
@@ -934,34 +946,62 @@ impl<'a> SimulationEngine<'a> {
                     // ガンビットルールの評価
                     let mut chosen_skill_id: Option<String> = None;
                     for rule in &attacker_char.gambit_rules {
-                        match &rule.condition {
+                        let matches = match &rule.condition {
                             Condition::SelfHpBelow(ratio) => {
-                                if (a_stats.current_hp as f32 / a_stats.max_hp as f32) < *ratio {
-                                    if let Action::UseActiveSkill(ref s) = rule.action {
-                                        chosen_skill_id = Some(s.clone());
-                                        break;
-                                    }
-                                }
+                                (a_stats.current_hp as f32 / a_stats.max_hp as f32) < *ratio
                             }
-                            Condition::Always => {
-                                if let Action::UseActiveSkill(ref s) = rule.action {
-                                    chosen_skill_id = Some(s.clone());
-                                    break;
-                                }
+                            Condition::TargetVitAbove(threshold) => {
+                                (d_stats.effective_stats.vit as u32) >= *threshold
                             }
-                            _ => {}
+                            Condition::Always => true,
+                            _ => false,
+                        };
+                        if matches {
+                            if let Action::UseActiveSkill(ref s) = rule.action {
+                                chosen_skill_id = Some(s.clone());
+                                break;
+                            }
                         }
                     }
 
-                    let (is_sure, phys_mult, skill_name_opt) = if let Some(ref sid) = chosen_skill_id {
+                    // 回復スキルの処理（サンクチュアリなど）
+                    if let Some(ref sid) = chosen_skill_id {
+                        if let Some(sk) = self.db.skills.get(sid) {
+                            if let Some(heal) = sk.heal_amount {
+                                let mut lowest_idx = a_idx;
+                                let mut lowest_ratio = attackers[a_idx].stats.current_hp as f32 / attackers[a_idx].stats.max_hp as f32;
+                                for (idx, ally) in attackers.iter().enumerate() {
+                                    if ally.is_alive {
+                                        let r = ally.stats.current_hp as f32 / ally.stats.max_hp as f32;
+                                        if r < lowest_ratio {
+                                            lowest_ratio = r;
+                                            lowest_idx = idx;
+                                        }
+                                    }
+                                }
+                                let target_ally_name = attackers[lowest_idx].character.name.clone();
+                                attackers[lowest_idx].stats.current_hp = (attackers[lowest_idx].stats.current_hp + heal as i32).min(attackers[lowest_idx].stats.max_hp as i32);
+                                logs.push(format!(
+                                    "   💚 [Tick {:>4}] {} はスキル【{}】を詠唱！ 『{}』 のHPを {} 回復！ (HP: {}/{})",
+                                    current_tick, attacker_char.name, sk.name, target_ally_name, heal,
+                                    attackers[lowest_idx].stats.current_hp, attackers[lowest_idx].stats.max_hp
+                                ));
+                                attackers[a_idx].next_action_tick = current_tick + a_stats.attack_interval_ticks;
+                                continue;
+                            }
+                        }
+                    }
+
+                    let (is_sure, phys_mult, is_piercing, skill_name_opt) = if let Some(ref sid) = chosen_skill_id {
                         let sk = self.db.skills.get(sid);
                         (
                             sk.map(|s| s.is_sure_hit).unwrap_or(false),
                             sk.and_then(|s| s.physical_multiplier).unwrap_or(1.0),
+                            sk.map(|s| s.is_piercing_def).unwrap_or(false),
                             sk.map(|s| s.name.clone()),
                         )
                     } else {
-                        (false, 1.0, None)
+                        (false, 1.0, false, None)
                     };
 
                     let hit_rate = (80 + a_stats.hit as i32 - d_stats.flee as i32).clamp(10, 95);
@@ -974,10 +1014,14 @@ impl<'a> SimulationEngine<'a> {
                         // PvPではプレイヤーはDemihuman（人間）扱い
                         let race_mult = self.calculate_race_damage_multiplier(&attacker_char, Race::Demihuman);
 
+                        let def_val = (d_stats.vit_def + d_stats.equip_def) as f32 * 0.5;
                         let raw_dmg = if is_crit {
                             base_dmg * race_mult * 1.4
+                        } else if is_piercing {
+                            // 錐効果: 敵の防御力・装甲（DEF/VIT）が高いほど大ダメージ！
+                            let pierce_bonus = (def_val * 4.2).max(60.0);
+                            (base_dmg + pierce_bonus) * race_mult
                         } else {
-                            let def_val = (d_stats.vit_def + d_stats.equip_def) as f32 * 0.5;
                             (base_dmg - def_val).max(1.0) * race_mult
                         };
 
@@ -985,7 +1029,9 @@ impl<'a> SimulationEngine<'a> {
                         defenders[t_idx].stats.current_hp -= final_dmg as i32;
                         attackers[a_idx].total_damage_dealt += final_dmg as u64;
 
-                        let act_desc = if let Some(sn) = skill_name_opt {
+                        let act_desc = if is_piercing {
+                            format!("スキル【{}】[装甲貫通・錐効果！]", skill_name_opt.as_deref().unwrap_or("錐撃"))
+                        } else if let Some(ref sn) = skill_name_opt {
                             format!("スキル【{}】(必中強撃)", sn)
                         } else if is_crit {
                             "通常攻撃 [CRITICAL! 防御無視]".to_string()

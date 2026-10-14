@@ -84,6 +84,7 @@ pub struct TownPassiveBonus {
 
 /// ギルド名簿管理システム
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct GuildRoster {
     pub max_capacity: usize,
     pub active_members: Vec<Character>,
@@ -93,6 +94,7 @@ pub struct GuildRoster {
     pub treasury_zeny: u32,
 }
 
+#[allow(dead_code)]
 impl GuildRoster {
     pub fn new(max_capacity: usize) -> Self {
         Self {

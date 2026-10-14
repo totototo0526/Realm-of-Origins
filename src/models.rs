@@ -229,6 +229,12 @@ pub struct Skill {
     /// 必中判定フラグ（HIT vs FLEE判定をバイパスし100%命中）
     #[serde(default)]
     pub is_sure_hit: bool,
+    /// 錐効果フラグ（対象のDEF/VITが高いほど追加ダメージ）
+    #[serde(default)]
+    pub is_piercing_def: bool,
+    /// 回復スキルの基本回復量
+    #[serde(default)]
+    pub heal_amount: Option<u32>,
     #[serde(default)]
     pub modifiers: Vec<Modifier>,
 }
@@ -242,6 +248,8 @@ pub enum Condition {
     TargetRaceIs(Race),
     /// 自身のHP割合が閾値未満（例: 0.3 = 30%以下）
     SelfHpBelow(f32),
+    /// ターゲットのVITが閾値以上（例: VIT 50以上）
+    TargetVitAbove(u32),
     /// 無条件（常に真）
     Always,
 }
