@@ -56,7 +56,20 @@ pub struct BattleResult {
     pub raw_loot_value: u32,
     pub overcharge_mult: f32,
     pub final_loot_value: u32,
+    pub gained_exp: u64,
     pub logs: Vec<String>,
+}
+
+/// 模擬GvG（3vs3パーティー対抗戦）の結果
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct GvgResult {
+    pub winner_team: String,
+    pub loser_team: String,
+    pub total_ticks: u32,
+    pub logs: Vec<String>,
+    pub team_a_survivors: Vec<String>,
+    pub team_b_survivors: Vec<String>,
 }
 
 /// 10連戦などのシミュレーション全体結果
@@ -71,6 +84,7 @@ pub struct SimulationSummary {
     pub total_raw_loot: u32,
     pub total_final_loot: u32,
     pub total_autospells: u32,
+    pub total_exp_gained: u64,
 }
 
 pub struct SimulationEngine<'a> {
@@ -613,9 +627,10 @@ impl<'a> SimulationEngine<'a> {
             current_tick += 1;
         }
 
-        // 3. ドロップアイテム抽選とOvercharge換金計算
+        // 3. ドロップアイテム抽選とOvercharge換金計算、および経験値
         let mut drops = Vec::new();
         let mut raw_loot_value = 0u32;
+        let mut gained_exp = 0u64;
 
         if monster.current_hp <= 0 {
             logs.push(format!(
@@ -636,6 +651,17 @@ impl<'a> SimulationEngine<'a> {
                     ));
                 }
             }
+
+            // 経験値計算（個体差ボーナス反映）
+            let base_exp = self.db.monsters.get(&monster.template_id).map(|m| m.base_exp).unwrap_or(400) as f32;
+            let exp_mult = match monster.archetype {
+                MonsterArchetype::Lucky => 1.5,
+                MonsterArchetype::Heavy => 1.3,
+                MonsterArchetype::Swift => 1.2,
+                MonsterArchetype::Standard => 1.0,
+            };
+            gained_exp = (base_exp * exp_mult).round() as u64;
+            logs.push(format!("   ⭐ 獲得経験値: {} EXP", gained_exp));
         }
 
         let final_loot_value = ((raw_loot_value as f32) * overcharge_mult).round() as u32;
@@ -649,6 +675,7 @@ impl<'a> SimulationEngine<'a> {
             raw_loot_value,
             overcharge_mult,
             final_loot_value,
+            gained_exp,
             logs,
         }
     }
@@ -712,6 +739,7 @@ impl<'a> SimulationEngine<'a> {
         let mut total_raw_loot = 0u32;
         let mut total_final_loot = 0u32;
         let mut total_autospells = 0u32;
+        let mut total_exp_gained = 0u64;
 
         for m_orig in monsters {
             let mut monster = m_orig.clone();
@@ -720,6 +748,7 @@ impl<'a> SimulationEngine<'a> {
             total_damage += result.total_damage;
             total_raw_loot += result.raw_loot_value;
             total_final_loot += result.final_loot_value;
+            total_exp_gained += result.gained_exp;
             for log in &result.logs {
                 if log.contains("オートスペル発動") {
                     total_autospells += 1;
@@ -743,6 +772,272 @@ impl<'a> SimulationEngine<'a> {
             total_raw_loot,
             total_final_loot,
             total_autospells,
+            total_exp_gained,
+        }
+    }
+
+    /// 3vs3 パーティー対抗模擬戦（GvGオートチェス形式）
+    /// プレイヤー現主力 vs かつて自分が育てて放出した古参キャラたちの激突！
+    pub fn simulate_gvg_battle(
+        &self,
+        team_a: &[Character],
+        team_b: &[Character],
+        name_a: &str,
+        name_b: &str,
+    ) -> GvgResult {
+        let mut rng = rand::thread_rng();
+        let weapon_mult_a = self.calculate_party_weapon_multiplier(team_a);
+        let weapon_mult_b = self.calculate_party_weapon_multiplier(team_b);
+
+        let mut combatants_a: Vec<Combatant> = team_a
+            .iter()
+            .map(|ch| {
+                let stats = self.calculate_combat_stats(ch, weapon_mult_a);
+                Combatant {
+                    character: ch.clone(),
+                    stats,
+                    next_action_tick: 0,
+                    is_alive: true,
+                    total_damage_dealt: 0,
+                    autospell_count: 0,
+                }
+            })
+            .collect();
+
+        let mut combatants_b: Vec<Combatant> = team_b
+            .iter()
+            .map(|ch| {
+                let stats = self.calculate_combat_stats(ch, weapon_mult_b);
+                Combatant {
+                    character: ch.clone(),
+                    stats,
+                    next_action_tick: 0,
+                    is_alive: true,
+                    total_damage_dealt: 0,
+                    autospell_count: 0,
+                }
+            })
+            .collect();
+
+        let mut logs = Vec::new();
+        logs.push(format!("🏆 【模擬GvG開戦】『{}』 VS 『{}』", name_a, name_b));
+        logs.push(format!(
+            "   陣形オーラ: 『{}』武器ATK+{}% | 『{}』武器ATK+{}%",
+            name_a, ((weapon_mult_a - 1.0) * 100.0).round(),
+            name_b, ((weapon_mult_b - 1.0) * 100.0).round()
+        ));
+
+        let mut current_tick = 0u32;
+
+        while combatants_a.iter().any(|c| c.is_alive)
+            && combatants_b.iter().any(|c| c.is_alive)
+            && current_tick < 15000
+        {
+            // チームAの行動
+            Self::process_gvg_team_turn(
+                &self,
+                &mut combatants_a,
+                &mut combatants_b,
+                name_a,
+                name_b,
+                current_tick,
+                &mut rng,
+                &mut logs,
+            );
+
+            // チームBの行動
+            Self::process_gvg_team_turn(
+                &self,
+                &mut combatants_b,
+                &mut combatants_a,
+                name_b,
+                name_a,
+                current_tick,
+                &mut rng,
+                &mut logs,
+            );
+
+            current_tick += 1;
+        }
+
+        let a_alive = combatants_a.iter().any(|c| c.is_alive);
+        let b_alive = combatants_b.iter().any(|c| c.is_alive);
+
+        let (winner, loser) = if a_alive && !b_alive {
+            (name_a.to_string(), name_b.to_string())
+        } else if b_alive && !a_alive {
+            (name_b.to_string(), name_a.to_string())
+        } else {
+            ("引き分け (Time Over)".to_string(), "".to_string())
+        };
+
+        let team_a_survivors: Vec<String> = combatants_a
+            .iter()
+            .filter(|c| c.is_alive)
+            .map(|c| format!("{} (HP: {}/{})", c.character.name, c.stats.current_hp, c.stats.max_hp))
+            .collect();
+
+        let team_b_survivors: Vec<String> = combatants_b
+            .iter()
+            .filter(|c| c.is_alive)
+            .map(|c| format!("{} (HP: {}/{})", c.character.name, c.stats.current_hp, c.stats.max_hp))
+            .collect();
+
+        logs.push(format!(
+            "\n🏁 【GvG決着 (Tick {})】勝者: 『{}』！",
+            current_tick, winner
+        ));
+
+        GvgResult {
+            winner_team: winner,
+            loser_team: loser,
+            total_ticks: current_tick,
+            logs,
+            team_a_survivors,
+            team_b_survivors,
+        }
+    }
+
+    /// GvGでの1チーム分の攻撃ターン処理
+    fn process_gvg_team_turn(
+        &self,
+        attackers: &mut [Combatant],
+        defenders: &mut [Combatant],
+        _atk_team_name: &str,
+        def_team_name: &str,
+        current_tick: u32,
+        rng: &mut rand::rngs::ThreadRng,
+        logs: &mut Vec<String>,
+    ) {
+        for a_idx in 0..attackers.len() {
+            if !attackers[a_idx].is_alive {
+                continue;
+            }
+            if attackers[a_idx].next_action_tick <= current_tick {
+                let attacker_char = attackers[a_idx].character.clone();
+                let a_stats = attackers[a_idx].stats.clone();
+
+                // ターゲット選定: 生存している敵の中で最もVIT/HPが高い前衛壁役を優先
+                let mut target_idx = None;
+                let mut max_vit = 0;
+                for (d_idx, d) in defenders.iter().enumerate() {
+                    if d.is_alive && d.stats.effective_stats.vit >= max_vit {
+                        max_vit = d.stats.effective_stats.vit;
+                        target_idx = Some(d_idx);
+                    }
+                }
+
+                if let Some(t_idx) = target_idx {
+                    let d_stats = defenders[t_idx].stats.clone();
+                    let target_name = defenders[t_idx].character.name.clone();
+
+                    // ガンビットルールの評価
+                    let mut chosen_skill_id: Option<String> = None;
+                    for rule in &attacker_char.gambit_rules {
+                        match &rule.condition {
+                            Condition::SelfHpBelow(ratio) => {
+                                if (a_stats.current_hp as f32 / a_stats.max_hp as f32) < *ratio {
+                                    if let Action::UseActiveSkill(ref s) = rule.action {
+                                        chosen_skill_id = Some(s.clone());
+                                        break;
+                                    }
+                                }
+                            }
+                            Condition::Always => {
+                                if let Action::UseActiveSkill(ref s) = rule.action {
+                                    chosen_skill_id = Some(s.clone());
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    let (is_sure, phys_mult, skill_name_opt) = if let Some(ref sid) = chosen_skill_id {
+                        let sk = self.db.skills.get(sid);
+                        (
+                            sk.map(|s| s.is_sure_hit).unwrap_or(false),
+                            sk.and_then(|s| s.physical_multiplier).unwrap_or(1.0),
+                            sk.map(|s| s.name.clone()),
+                        )
+                    } else {
+                        (false, 1.0, None)
+                    };
+
+                    let hit_rate = (80 + a_stats.hit as i32 - d_stats.flee as i32).clamp(10, 95);
+                    let hit_roll: i32 = rng.gen_range(1..=100);
+                    let crit_roll: f32 = rng.gen_range(0.0..100.0);
+                    let is_crit = crit_roll < (a_stats.crit - (d_stats.effective_stats.luk as f32 * 0.15));
+
+                    if is_sure || is_crit || hit_roll <= hit_rate {
+                        let base_dmg = rng.gen_range(a_stats.min_atk..=a_stats.max_atk) as f32 * phys_mult;
+                        // PvPではプレイヤーはDemihuman（人間）扱い
+                        let race_mult = self.calculate_race_damage_multiplier(&attacker_char, Race::Demihuman);
+
+                        let raw_dmg = if is_crit {
+                            base_dmg * race_mult * 1.4
+                        } else {
+                            let def_val = (d_stats.vit_def + d_stats.equip_def) as f32 * 0.5;
+                            (base_dmg - def_val).max(1.0) * race_mult
+                        };
+
+                        let final_dmg = raw_dmg.round() as u32 + a_stats.ignore_def_damage;
+                        defenders[t_idx].stats.current_hp -= final_dmg as i32;
+                        attackers[a_idx].total_damage_dealt += final_dmg as u64;
+
+                        let act_desc = if let Some(sn) = skill_name_opt {
+                            format!("スキル【{}】(必中強撃)", sn)
+                        } else if is_crit {
+                            "通常攻撃 [CRITICAL! 防御無視]".to_string()
+                        } else {
+                            "通常攻撃".to_string()
+                        };
+
+                        if final_dmg > 200 || is_sure || is_crit {
+                            logs.push(format!(
+                                "   ⚔️ [Tick {:>4}] {} の {} -> 『{}』の {} に {} ダメージ!",
+                                current_tick, attacker_char.name, act_desc, def_team_name, target_name, final_dmg
+                            ));
+                        }
+
+                        // オートスペル判定
+                        let as_mult = a_stats.autospell_chance_mult;
+                        for equip in &attacker_char.equipments {
+                            for card in &equip.cards {
+                                for modifier in &card.modifiers {
+                                    if let Trigger::OnNormalAttackHit { chance } = modifier.trigger {
+                                        if rng.gen::<f32>() < (chance * as_mult).min(1.0) {
+                                            if let Effect::AutoSpell { ref skill_id, level } = modifier.effect {
+                                                if let Some(skill) = self.db.skills.get(skill_id) {
+                                                    let mult = skill.magic_multiplier.unwrap_or(level as f32);
+                                                    let magic_dmg = ((a_stats.matk as f32) * mult).round() as u32;
+                                                    defenders[t_idx].stats.current_hp -= magic_dmg as i32;
+                                                    attackers[a_idx].total_damage_dealt += magic_dmg as u64;
+
+                                                    logs.push(format!(
+                                                        "   🔮★ [Tick {:>4}] {} の {} がオートスペル発動！ {} に {} の追加魔法ダメージ!",
+                                                        current_tick, attacker_char.name, skill.name, target_name, magic_dmg
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if defenders[t_idx].stats.current_hp <= 0 {
+                            defenders[t_idx].is_alive = false;
+                            logs.push(format!(
+                                "   💀 [Tick {:>4}] 『{}』の {} は力尽き倒れた！",
+                                current_tick, def_team_name, target_name
+                            ));
+                        }
+                    }
+
+                    attackers[a_idx].next_action_tick = current_tick + a_stats.attack_interval_ticks;
+                }
+            }
         }
     }
 }

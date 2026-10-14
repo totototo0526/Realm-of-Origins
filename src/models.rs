@@ -277,6 +277,10 @@ pub struct Job {
     pub modifiers: Vec<Modifier>,
 }
 
+fn default_generation() -> u8 {
+    1
+}
+
 /// プレイヤーキャラクター
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Character {
@@ -289,6 +293,38 @@ pub struct Character {
     pub learned_skills: Vec<Skill>,
     #[serde(default)]
     pub gambit_rules: Vec<GambitRule>,
+    #[serde(default = "default_generation")]
+    pub generation: u8,
+    #[serde(default)]
+    pub exp: u64,
+    #[serde(default)]
+    pub activity_score: u32,
+}
+
+impl Character {
+    #[allow(dead_code)]
+    pub fn new_with_gen(
+        id: &str,
+        name: &str,
+        job_id: &str,
+        level: u32,
+        generation: u8,
+        base_stats: Stats,
+    ) -> Self {
+        Self {
+            id: id.to_string(),
+            name: name.to_string(),
+            job_id: job_id.to_string(),
+            level,
+            base_stats,
+            equipments: vec![],
+            learned_skills: vec![],
+            gambit_rules: vec![],
+            generation,
+            exp: 0,
+            activity_score: 100,
+        }
+    }
 }
 
 /// モンスターのドロップアイテム定義

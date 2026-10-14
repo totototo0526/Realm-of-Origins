@@ -2,9 +2,11 @@ use rand::Rng;
 use crate::models::{Character, Equipment, StatType};
 
 /// 精錬の基本コスト（1回あたりのZeny）
+#[allow(dead_code)]
 pub const REFINE_BASE_COST: u32 = 300;
 
 /// 精錬の安全圏上限（100%成功）
+#[allow(dead_code)]
 pub const SAFE_REFINE_LIMIT: u8 = 4;
 
 /// ワークオーダー（バッチ精錬指示）の実行モード
@@ -23,6 +25,7 @@ pub enum WorkOrderMode {
 
 /// ワークオーダー（作業指示書）
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct WorkOrder {
     pub order_name: String,
     pub mode: WorkOrderMode,
@@ -40,8 +43,10 @@ pub struct WorkOrderReport {
 }
 
 /// 精錬システム（クホホ工場）
+#[allow(dead_code)]
 pub struct Refinery;
 
+#[allow(dead_code)]
 impl Refinery {
     /// 基礎成功率テーブル（0 -> 1 は +1 チャレンジ）
     /// レベルに応じた基本成功率（%）

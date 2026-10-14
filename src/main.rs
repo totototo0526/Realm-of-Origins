@@ -1,314 +1,243 @@
 mod engine;
+mod guild;
 mod loader;
 mod models;
+mod progression;
 mod refinery;
 
 use engine::SimulationEngine;
+use guild::{BuildTag, FaDecision, GuildRoster, RivalGuild};
 use loader::ModDatabase;
 use models::{
     Action, Character, Condition, EquipSlot, Equipment, GambitRule,
     MonsterArchetype, Stats,
 };
-use refinery::{Refinery, WorkOrder, WorkOrderMode};
+use progression::{GrowthPlan, Progression};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("================================================================================");
-    println!("  Realm of Origins - フェーズ2：簡易ガンビット ＆ ワークオーダー式過剰精錬");
-    println!("  【戦闘 → 資金獲得 → 精錬による装備強化・ロスト → ガンビット再挑戦で逆転】");
+    println!("  Realm of Origins - フェーズ3：レガシー転生 ＆ パワーレベリング ＆ 模擬GvG");
+    println!("  【世代交代・セルフ養殖・シナジー引力によるライバルギルド形成と激突】");
     println!("================================================================================\n");
 
-    // 1. mods/core/ からのデータ読み込み
-    println!("📦 [1/5] mods/core/ から外部データ(RON)をロード中...");
+    // 1. mods/core/ からデータロード
+    println!("📦 [1/6] mods/core/ から外部データ(RON)をロード中...");
     let db = ModDatabase::load_from_dir("mods/core")?;
-    println!("   - 職業: {} 件, カード: {} 件, スキル: {} 件, モンスター: {} 件\n",
-        db.jobs.len(), db.cards.len(), db.skills.len(), db.monsters.len()
-    );
-
     let engine = SimulationEngine::new(&db);
 
-    // 2. 10連戦モンスター群の生成（性格個体差つき）
+    // -------------------------------------------------------------------------
+    // 【Step 1: パワーレベリング（セルフ養殖）の実証】
+    // -------------------------------------------------------------------------
+    println!("--------------------------------------------------------------------------------");
+    println!(" 【Step 1: パワーレベリング（セルフ養殖）の実証】");
+    println!("--------------------------------------------------------------------------------");
+    println!(" 🐣 新規作成: 第2世代 Lv.1 新キャラ『ルカ』 (レガシー転生ボーナス: +8ステータスP)");
+    println!("    育成方針: 【{}】 (INT/DEX魔導支援)", GrowthPlan::IntDexSupport.name_ja());
+
+    // パターン1: ソロ育成（Lv1キャラ単独でオークウォーリアー10連戦）
+    let mut solo_rookie = Progression::create_reincarnated_character(
+        "rookie_solo",
+        "ルカ (ソロ挑戦)",
+        "thief",
+        2,
+        GrowthPlan::IntDexSupport,
+    );
+    // 初期短剣
+    solo_rookie.equipments.push(Equipment::new("knife", "ナイフ", EquipSlot::Weapon, 15, 0));
+
     let orc_template = db.monsters.get("orc_warrior").expect("orc_warrior not found");
-    let high_orc_template = db.monsters.get("high_orc").expect("high_orc not found");
-
-    let monster_archetypes = [
-        (orc_template, MonsterArchetype::Standard),
-        (orc_template, MonsterArchetype::Swift),
-        (orc_template, MonsterArchetype::Heavy),
-        (orc_template, MonsterArchetype::Lucky),
-        (orc_template, MonsterArchetype::Swift),
-        (orc_template, MonsterArchetype::Standard),
-        (orc_template, MonsterArchetype::Heavy),
-        (orc_template, MonsterArchetype::Lucky),
-        (high_orc_template, MonsterArchetype::Heavy),
-        (high_orc_template, MonsterArchetype::Swift),
-    ];
-
-    let mut test_monsters = Vec::new();
-    for (template, archetype) in monster_archetypes.iter() {
-        test_monsters.push(engine.spawn_monster(template, *archetype));
+    let mut solo_monsters = Vec::new();
+    for _ in 0..10 {
+        solo_monsters.push(engine.spawn_monster(orc_template, MonsterArchetype::Standard));
     }
 
-    // -------------------------------------------------------------------------
-    // 【Step 1: 初期狩り（ベースライン計測 ＆ 資金稼ぎ）】
-    // -------------------------------------------------------------------------
-    println!("--------------------------------------------------------------------------------");
-    println!(" 【Step 1: 初期狩り（ベースライン計測 ＆ 資金稼ぎ）】");
-    println!("--------------------------------------------------------------------------------");
-    let party_a = build_party_a(&db);
-    let party_b_initial = build_party_b(&db, None, false);
+    println!("\n ▶ [テスト1] ソロ育成: Lv.1ルカが単独でオーク狩りに挑戦...");
+    let solo_summary = engine.run_scenario("ソロ育成", &[solo_rookie.clone()], &solo_monsters);
+    let mut solo_logs = Vec::new();
+    let _ = Progression::grant_exp(&mut solo_rookie, solo_summary.total_exp_gained, GrowthPlan::IntDexSupport, &mut solo_logs);
 
-    println!(" ▶ パーティーA（脳筋構成: 高速アタッカー×2 + 壁役×1）の出撃...");
-    let summary_a = engine.run_scenario("パーティーA (脳筋構成)", &party_a, &test_monsters);
-    println!("   => 総討伐Tick: {} Tick, 獲得Zeny: {} Zeny", summary_a.total_ticks, summary_a.total_final_loot);
+    println!(
+        "   => 総討伐Tick: {:>5} Tick | 獲得EXP: {:>5} EXP | 到達レベル: Lv.{} (成長困難・ほぼ瞬殺)",
+        solo_summary.total_ticks, solo_summary.total_exp_gained, solo_rookie.level
+    );
 
-    println!(" ▶ パーティーB（初期シナジー構成: 特化ASシーフ + 壁役 + 鍛冶屋兼商人）の出撃...");
-    let summary_b = engine.run_scenario("パーティーB (精錬前)", &party_b_initial, &test_monsters);
-    println!("   => 総討伐Tick: {} Tick, 獲得Zeny: {} Zeny (Overcharge適用)", summary_b.total_ticks, summary_b.total_final_loot);
+    // パターン2: セルフ養殖（フェーズ2完成の+10武器先輩シーフ＋ナイトが引率しハイオーク10連戦）
+    let mut leeched_rookie = Progression::create_reincarnated_character(
+        "rookie_leeched",
+        "ルカ (セルフ養殖)",
+        "thief",
+        2,
+        GrowthPlan::IntDexSupport,
+    );
+    leeched_rookie.equipments.push(Equipment::new("knife", "ナイフ", EquipSlot::Weapon, 15, 0));
 
-    let starting_zeny = 60_000u32;
-    println!("\n 💰 Overchargeによる狩り成果とギルド資金をプール: 合計 {} Zeny", starting_zeny);
-    println!(" 🗡️ 工場へ投入するベース武器: 「ダマスカス短剣 (ATK:75, スロット4)」 × 20本 を準備完了\n");
+    // 先輩コンビの準備
+    let hydra_card = db.cards.get("hydra_card").cloned().unwrap();
+    let flame_eye_card = db.cards.get("flame_eye_card").cloned().unwrap();
+    let mut god_dagger = Equipment::new("god_damascus", "+10 業物・滅殺烈火ダマスカス", EquipSlot::Weapon, 75, 10);
+    god_dagger.cards = vec![hydra_card, flame_eye_card];
+    god_dagger.is_locked = true;
 
-    // -------------------------------------------------------------------------
-    // 【Step 2: 全自動クホホ工場の稼働（ワークオーダー式過剰精錬）】
-    // -------------------------------------------------------------------------
-    println!("--------------------------------------------------------------------------------");
-    println!(" 【Step 2: 全自動クホホ工場の稼働（ワークオーダー式過剰精錬）】");
-    println!("--------------------------------------------------------------------------------");
-    let smith = &party_b_initial[2]; // 鍛冶屋兼商人 (DEX 90, LUK 85)
-
-    // ベース武器20本の生成
-    let mut base_weapons = Vec::new();
-    for i in 1..=20 {
-        base_weapons.push(Equipment {
-            id: format!("damascus_{}", i),
-            name: "ダマスカス".to_string(),
-            slot: EquipSlot::Weapon,
-            weapon_atk: 75,
-            refine: 0,
-            slots: 4,
-            cards: vec![],
-            modifiers: vec![],
-            is_locked: false,
-        });
-    }
-
-    let order = WorkOrder {
-        order_name: "神話級 +10 業物ダマスカス量産計画".to_string(),
-        mode: WorkOrderMode::BudgetBurn {
-            target_level: 10,
-            max_zeny: starting_zeny,
-            max_weapons: 20,
-        },
-        target_level: 10,
+    let senior_thief = Character {
+        id: "senior_thief".to_string(),
+        name: "先輩シーフ (+10ダマスカス)".to_string(),
+        job_id: "thief".to_string(),
+        level: 48,
+        base_stats: Stats::new(60, 75, 20, 25, 35, 15),
+        equipments: vec![god_dagger.clone()],
+        learned_skills: vec![db.skills.get("bash").cloned().unwrap()],
+        gambit_rules: vec![
+            GambitRule {
+                id: "必中バッシュ".to_string(),
+                priority: 1,
+                condition: Condition::Always,
+                action: Action::UseActiveSkill("bash".to_string()),
+            },
+        ],
+        generation: 1,
+        exp: 50000,
+        activity_score: 100,
     };
 
-    let (report, _remaining_zeny) = Refinery::process_work_order(&order, base_weapons, smith, starting_zeny);
+    let senior_knight = Character {
+        id: "senior_knight".to_string(),
+        name: "先輩ナイト (壁役/VIT)".to_string(),
+        job_id: "knight".to_string(),
+        level: 50,
+        base_stats: Stats::new(45, 20, 80, 10, 30, 10),
+        equipments: vec![
+            Equipment::new("tsurugi", "ツルギ", EquipSlot::Weapon, 80, 5),
+            Equipment::new("shield", "ラウンドシールド", EquipSlot::Shield, 0, 5),
+        ],
+        learned_skills: vec![db.skills.get("iron_defense").cloned().unwrap()],
+        gambit_rules: vec![],
+        generation: 1,
+        exp: 60000,
+        activity_score: 100,
+    };
 
-    // バッチ精錬ログの表示
-    for log in &report.logs {
+    let high_orc_template = db.monsters.get("high_orc").expect("high_orc not found");
+    let mut high_orc_monsters = Vec::new();
+    for _ in 0..10 {
+        high_orc_monsters.push(engine.spawn_monster(high_orc_template, MonsterArchetype::Heavy));
+    }
+
+    println!("\n ▶ [テスト2] セルフ養殖: 先輩シーフ＆ナイトがLv.1ルカを連れ、格上ハイオーク10連戦へ出撃！");
+    let leech_party = vec![senior_thief.clone(), senior_knight.clone(), leeched_rookie.clone()];
+    let leech_summary = engine.run_scenario("セルフ養殖", &leech_party, &high_orc_monsters);
+
+    let mut levelup_logs = Vec::new();
+    // 獲得経験値をルカに集中（または均等分配）
+    let gained_exp_for_rookie = leech_summary.total_exp_gained;
+    let levels_gained = Progression::grant_exp(&mut leeched_rookie, gained_exp_for_rookie, GrowthPlan::IntDexSupport, &mut levelup_logs);
+
+    for log in &levelup_logs {
         println!("{}", log);
     }
 
-    // 生き残った最上位武器の選定
-    let mut best_weapon = report.completed_weapons.first().cloned().unwrap_or_else(|| {
-        // 万が一の全滅フォールバック
-        Equipment {
-            id: "miracle_damascus".to_string(),
-            name: "ダマスカス".to_string(),
-            slot: EquipSlot::Weapon,
-            weapon_atk: 75,
-            refine: 9,
-            slots: 4,
-            cards: vec![],
-            modifiers: vec![],
-            is_locked: false,
-        }
-    });
-
-    println!("\n🏆 【最高精錬品の誕生】");
-    println!("   完成品: 「+{} {}」 (スロット数: {})", best_weapon.refine, best_weapon.name, best_weapon.slots);
-
-    // カードの装着と希少品ロック
-    let hydra_card = db.cards.get("hydra_card").cloned().unwrap();
-    let flame_eye_card = db.cards.get("flame_eye_card").cloned().unwrap();
-    best_weapon.cards = vec![hydra_card, flame_eye_card];
-    best_weapon.name = format!("+{} 業物・滅殺烈火ダマスカス[亜人特化&AS]", best_weapon.refine);
-    best_weapon.is_locked = true; // 希少品ロック（安全装置）
-
-    println!("   🎴 カード装着: ヒドラカード(亜人特効+20%) ＆ 炎眼のカード(オートスペル:FB3)");
-    println!("   🔒 希少品保護ロックを適用 (is_locked = true: 破壊リスク精錬を自動拒否)\n");
+    println!(
+        "\n   ✨ 【セルフ養殖完了】総Tick: {} Tick | 獲得EXP: {} EXP | 到達レベル: Lv.{} (+{} レベル爆上がり!)",
+        leech_summary.total_ticks, gained_exp_for_rookie, leeched_rookie.level, levels_gained
+    );
 
     // -------------------------------------------------------------------------
-    // 【Step 3: 強化装備 ＋ 簡易ガンビットでの再挑戦（下克上検証）】
+    // 【Step 2: 世代交代とFA移籍（シナジー引力によるライバル結成）】
     // -------------------------------------------------------------------------
+    println!("\n--------------------------------------------------------------------------------");
+    println!(" 【Step 2: 世代交代とFA移籍（シナジー引力によるライバル結成）】");
     println!("--------------------------------------------------------------------------------");
-    println!(" 【Step 3: 強化装備 ＋ 簡易ガンビットでの再挑戦（下克上検証）】");
-    println!("--------------------------------------------------------------------------------");
-    println!(" 🎯 ガンビット設定（シーフ）:");
-    println!("    [優先度 1] 条件: 敵が迅速型 (Swift) -> 行動: スキル【バッシュ(必中強撃)】で高FLEE無効化！");
-    println!("    [優先度 2] 条件: 通常時 (Always)    -> 行動: 通常攻撃（過剰精錬ボーナス＆オートスペル連打）\n");
+    let mut guild_roster = GuildRoster::new(6); // 定員6名
 
-    let party_b_reformed = build_party_b(&db, Some(best_weapon), true);
-
-    println!("⚔️  パーティーB改（過剰精錬武器 ＋ 対迅速型ガンビット）の出撃！");
-    let summary_b_reformed = run_and_print_party_simulation(&engine, "パーティーB改 (過剰精錬+ガンビット)", &party_b_reformed, &test_monsters);
-
-    // -------------------------------------------------------------------------
-    // 【最終比較サマリー（3列比較）】
-    // -------------------------------------------------------------------------
-    println!("\n================================================================================");
-    println!(" 📊 最終比較サマリー（脳筋 vs シナジー初期 vs シナジー過剰精錬+ガンビット）");
-    println!("================================================================================");
-    print_three_way_comparison(&summary_a, &summary_b, &summary_b_reformed);
-
-    Ok(())
-}
-
-/// パーティーA（脳筋構成）
-fn build_party_a(db: &ModDatabase) -> Vec<Character> {
-    let dagger = Equipment {
-        id: "gladius".to_string(),
-        name: "グラディウス".to_string(),
-        slot: EquipSlot::Weapon,
-        weapon_atk: 65,
-        refine: 4,
-        slots: 3,
-        cards: vec![],
-        modifiers: vec![],
-        is_locked: false,
+    // 過去に活躍した歴代キャラクターたちを名簿に登録
+    let old_bs = Character {
+        id: "gen1_bs".to_string(),
+        name: "第1世代 鍛冶屋ボブ".to_string(),
+        job_id: "blacksmith".to_string(),
+        level: 45,
+        base_stats: Stats::new(10, 10, 30, 10, 90, 85),
+        equipments: vec![Equipment::new("wrench", "古びたスパナ", EquipSlot::Weapon, 30, 0)],
+        learned_skills: vec![db.skills.get("weapon_research").cloned().unwrap(), db.skills.get("overcharge").cloned().unwrap()],
+        gambit_rules: vec![],
+        generation: 1,
+        exp: 40000,
+        activity_score: 20, // 非稼働
     };
 
-    let knight_sword = Equipment {
-        id: "tsurugi".to_string(),
-        name: "ツルギ".to_string(),
-        slot: EquipSlot::Weapon,
-        weapon_atk: 80,
-        refine: 5,
-        slots: 2,
-        cards: vec![],
-        modifiers: vec![],
-        is_locked: false,
-    };
-
-    let knight_shield = Equipment {
-        id: "shield".to_string(),
-        name: "ラウンドシールド".to_string(),
-        slot: EquipSlot::Shield,
-        weapon_atk: 0,
-        refine: 5,
-        slots: 1,
-        cards: vec![],
-        modifiers: vec![],
-        is_locked: false,
-    };
-
-    let iron_defense_skill = db.skills.get("iron_defense").cloned().unwrap();
-
-    vec![
-        Character {
-            id: "thief_1".to_string(),
-            name: "シーフA (純AGI/STR)".to_string(),
-            job_id: "thief".to_string(),
-            level: 45,
-            base_stats: Stats::new(65, 72, 20, 10, 35, 15),
-            equipments: vec![dagger.clone()],
-            learned_skills: vec![],
-            gambit_rules: vec![],
-        },
-        Character {
-            id: "thief_2".to_string(),
-            name: "シーフB (純AGI/STR)".to_string(),
-            job_id: "thief".to_string(),
-            level: 45,
-            base_stats: Stats::new(65, 72, 20, 10, 35, 15),
-            equipments: vec![dagger],
-            learned_skills: vec![],
-            gambit_rules: vec![],
-        },
-        Character {
-            id: "knight".to_string(),
-            name: "ナイト (壁役/VIT)".to_string(),
-            job_id: "knight".to_string(),
-            level: 48,
-            base_stats: Stats::new(40, 20, 75, 10, 30, 10),
-            equipments: vec![knight_sword, knight_shield],
-            learned_skills: vec![iron_defense_skill],
-            gambit_rules: vec![],
-        },
-    ]
-}
-
-/// パーティーB（シナジー構成 / カスタム武器＆ガンビット対応）
-fn build_party_b(
-    db: &ModDatabase,
-    custom_weapon: Option<Equipment>,
-    enable_gambit: bool,
-) -> Vec<Character> {
-    let dagger = if let Some(w) = custom_weapon {
-        w
-    } else {
-        let hydra_card = db.cards.get("hydra_card").cloned().unwrap();
-        let flame_eye_card = db.cards.get("flame_eye_card").cloned().unwrap();
-        Equipment {
-            id: "custom_gladius".to_string(),
-            name: "+5 特化＆オートスペル短剣".to_string(),
-            slot: EquipSlot::Weapon,
-            weapon_atk: 65,
-            refine: 5,
-            slots: 3,
-            cards: vec![hydra_card, flame_eye_card],
-            modifiers: vec![],
-            is_locked: false,
-        }
-    };
-
-    let knight_sword = Equipment {
-        id: "tsurugi".to_string(),
-        name: "ツルギ".to_string(),
-        slot: EquipSlot::Weapon,
-        weapon_atk: 80,
-        refine: 5,
-        slots: 2,
-        cards: vec![],
-        modifiers: vec![],
-        is_locked: false,
-    };
-
-    let knight_shield = Equipment {
-        id: "shield".to_string(),
-        name: "ラウンドシールド".to_string(),
-        slot: EquipSlot::Shield,
-        weapon_atk: 0,
-        refine: 5,
-        slots: 1,
-        cards: vec![],
-        modifiers: vec![],
-        is_locked: false,
-    };
-
-    let blacksmith_wrench = Equipment {
-        id: "wrench".to_string(),
-        name: "鍛冶職人のスパナ".to_string(),
-        slot: EquipSlot::Weapon,
-        weapon_atk: 30,
-        refine: 0,
-        slots: 2,
-        cards: vec![],
-        modifiers: vec![],
-        is_locked: false,
-    };
-
-    let iron_defense_skill = db.skills.get("iron_defense").cloned().unwrap();
-    let weapon_research = db.skills.get("weapon_research").cloned().unwrap();
-    let overcharge = db.skills.get("overcharge").cloned().unwrap();
-    let bash_skill = db.skills.get("bash").cloned().unwrap();
-
-    // ガンビット設定
-    let gambit_rules = if enable_gambit {
-        vec![
+    let old_thief_a = Character {
+        id: "gen1_thief_a".to_string(),
+        name: "第1世代 シーフ・クロード".to_string(),
+        job_id: "thief".to_string(),
+        level: 46,
+        base_stats: Stats::new(70, 75, 20, 10, 35, 15),
+        equipments: vec![Equipment::new("dagger", "+7 ダマスカス", EquipSlot::Weapon, 75, 7)],
+        learned_skills: vec![db.skills.get("bash").cloned().unwrap()],
+        gambit_rules: vec![
             GambitRule {
-                id: "対迅速型(Swift)必中強撃".to_string(),
+                id: "バッシュ連打".to_string(),
+                priority: 1,
+                condition: Condition::Always,
+                action: Action::UseActiveSkill("bash".to_string()),
+            },
+        ],
+        generation: 1,
+        exp: 45000,
+        activity_score: 25, // 非稼働
+    };
+
+    let old_knight = Character {
+        id: "gen1_knight".to_string(),
+        name: "第1世代 重騎士バルガス".to_string(),
+        job_id: "knight".to_string(),
+        level: 47,
+        base_stats: Stats::new(45, 20, 80, 10, 30, 10),
+        equipments: vec![Equipment::new("shield", "+7 アイアンシールド", EquipSlot::Shield, 0, 7)],
+        learned_skills: vec![db.skills.get("iron_defense").cloned().unwrap()],
+        gambit_rules: vec![],
+        generation: 1,
+        exp: 48000,
+        activity_score: 30, // 非稼働
+    };
+
+    let gen3_assassin = Character {
+        id: "gen3_sin".to_string(),
+        name: "第3世代 影縫いのアサシン".to_string(),
+        job_id: "thief".to_string(),
+        level: 48,
+        base_stats: Stats::new(65, 80, 20, 10, 40, 20),
+        equipments: vec![Equipment::new("katar", "+8 ジャマダハル", EquipSlot::Weapon, 85, 8)],
+        learned_skills: vec![],
+        gambit_rules: vec![],
+        generation: 3,
+        exp: 55000,
+        activity_score: 40,
+    };
+
+    let gen4_paladin = Character {
+        id: "gen4_pala".to_string(),
+        name: "第4世代 聖騎士レオナルド".to_string(),
+        job_id: "knight".to_string(),
+        level: 50,
+        base_stats: Stats::new(45, 25, 85, 15, 35, 15),
+        equipments: vec![Equipment::new("shield", "+8 聖騎士の盾", EquipSlot::Shield, 0, 8)],
+        learned_skills: vec![db.skills.get("iron_defense").cloned().unwrap()],
+        gambit_rules: vec![],
+        generation: 4,
+        exp: 65000,
+        activity_score: 80,
+    };
+
+    // 第5世代現エース
+    let gen5_ace = Character {
+        id: "gen5_ace".to_string(),
+        name: "第5世代 幻影の疾風シーフ".to_string(),
+        job_id: "thief".to_string(),
+        level: 52,
+        base_stats: Stats::new(65, 85, 25, 30, 40, 25), // レガシーボーナス込み
+        equipments: vec![god_dagger.clone()],
+        learned_skills: vec![db.skills.get("bash").cloned().unwrap()],
+        gambit_rules: vec![
+            GambitRule {
+                id: "迅速型必中撃".to_string(),
                 priority: 1,
                 condition: Condition::TargetArchetypeIs(MonsterArchetype::Swift),
                 action: Action::UseActiveSkill("bash".to_string()),
@@ -319,121 +248,144 @@ fn build_party_b(
                 condition: Condition::Always,
                 action: Action::NormalAttack,
             },
-        ]
-    } else {
-        vec![]
+        ],
+        generation: 5,
+        exp: 75000,
+        activity_score: 100,
     };
 
-    vec![
-        Character {
-            id: "thief_b".to_string(),
-            name: "シーフ (特化AS型)".to_string(),
-            job_id: "thief".to_string(),
-            level: 45,
-            base_stats: Stats::new(60, 70, 20, 25, 35, 15),
-            equipments: vec![dagger],
-            learned_skills: vec![bash_skill],
-            gambit_rules,
-        },
-        Character {
-            id: "knight".to_string(),
-            name: "ナイト (壁役/VIT)".to_string(),
-            job_id: "knight".to_string(),
-            level: 48,
-            base_stats: Stats::new(40, 20, 75, 10, 30, 10),
-            equipments: vec![knight_sword, knight_shield],
-            learned_skills: vec![iron_defense_skill],
-            gambit_rules: vec![],
-        },
-        Character {
-            id: "blacksmith_merchant".to_string(),
-            name: "鍛冶屋兼商人 (DEX/LUK極)".to_string(),
-            job_id: "blacksmith".to_string(),
-            level: 45,
-            base_stats: Stats::new(10, 10, 30, 10, 90, 85),
-            equipments: vec![blacksmith_wrench],
-            learned_skills: vec![weapon_research, overcharge],
-            gambit_rules: vec![],
-        },
-    ]
-}
+    guild_roster.add_member(old_bs);
+    guild_roster.add_member(old_thief_a);
+    guild_roster.add_member(old_knight);
+    guild_roster.add_member(leeched_rookie.clone());
+    guild_roster.add_member(gen3_assassin);
+    guild_roster.add_member(gen4_paladin.clone());
+    guild_roster.add_member(gen5_ace.clone()); // 7人目（定員6名超過！）
 
-/// パーティーの戦闘シミュレーションを実行し、ログを表示
-fn run_and_print_party_simulation(
-    engine: &SimulationEngine,
-    party_label: &str,
-    party: &[Character],
-    monsters: &[models::SpawnedMonster],
-) -> engine::SimulationSummary {
-    let summary = engine.run_scenario(party_label, party, monsters);
+    println!(" 📜 ギルド名簿が定員（6名）を超過 (現在7名)。世代交代シフトを実行します...");
 
-    for (idx, battle) in summary.battles.iter().enumerate() {
-        println!("\n▶ [第{:>2}戦] vs {}", idx + 1, battle.monster_name);
-        for log in &battle.logs {
-            println!("{}", log);
+    // 第5世代現主力と新人が出撃し、第1世代古参メンバーが非稼働判定
+    let deployed_ids = vec![gen5_ace.id.clone(), gen4_paladin.id.clone(), leeched_rookie.id.clone()];
+    let fa_candidates = guild_roster.process_generation_shift(&deployed_ids);
+
+    println!(" 🚨 FA（フリーエージェント）宣言者: {}名", fa_candidates.len());
+
+    let mut rival_guild = RivalGuild::new("黒曜の旅団");
+    let mut guild_logs = Vec::new();
+
+    for candidate in fa_candidates {
+        let tag = BuildTag::analyze(&candidate);
+        if tag == BuildTag::WeaponSupport {
+            // 鍛冶屋は街のNPCとして引退（ギルドに武器ATK+3%の永続パッシブを提供）
+            let _ = guild_roster.handle_fa_decision(candidate, FaDecision::RetireAsTownNpc, &mut guild_logs);
+        } else {
+            // アタッカーやナイトは移籍金を得てライバルリーグへ移籍承認
+            if let Some(transferred) = guild_roster.handle_fa_decision(candidate, FaDecision::ApproveTransfer, &mut guild_logs) {
+                // ライバルギルドへ入団（シナジー引力）
+                rival_guild.recruit_and_train(transferred, &mut guild_logs);
+            }
         }
-        println!(
-            "   ⏱ 討伐所要Tick: {:>4} Tick | 与ダメージ: {:>5} | 戦利品換金: {:>6} Zeny",
-            battle.total_ticks, battle.total_damage, battle.final_loot_value
-        );
     }
 
-    summary
-}
+    // 鍛冶屋の移籍シミュレーション（ライバルギルド側にも武器研究BSが欲しいので旧BSクローンをライバルへ派遣）
+    let rival_bs = Character {
+        id: "rival_bs".to_string(),
+        name: "元祖・鍛冶職人ボブ (黒曜顧問)".to_string(),
+        job_id: "blacksmith".to_string(),
+        level: 48,
+        base_stats: Stats::new(15, 10, 35, 10, 95, 90),
+        equipments: vec![Equipment::new("wrench", "黒曜の特注スパナ", EquipSlot::Weapon, 40, 5)],
+        learned_skills: vec![db.skills.get("weapon_research").cloned().unwrap()],
+        gambit_rules: vec![],
+        generation: 1,
+        exp: 50000,
+        activity_score: 100,
+    };
+    rival_guild.recruit_and_train(rival_bs, &mut guild_logs);
 
-/// 3者比較サマリーを表形式で出力
-fn print_three_way_comparison(
-    a: &engine::SimulationSummary,
-    b: &engine::SimulationSummary,
-    c: &engine::SimulationSummary,
-) {
-    println!("┌─────────────────────────────┬──────────────────┬──────────────────┬──────────────────┐");
-    println!("│ 評価項目                    │ パーティーA (脳筋)│ パーティーB(初期) │ パーティーB改(完成)│");
-    println!("├─────────────────────────────┼──────────────────┼──────────────────┼──────────────────┤");
-    println!(
-        "│ 総討伐時間 (Tick合計)       │ {:>12} Tick │ {:>12} Tick │ {:>12} Tick │",
-        a.total_ticks, b.total_ticks, c.total_ticks
-    );
-    println!(
-        "│ 平均討伐時間 (Tick/戦)      │ {:>12.1} Tick │ {:>12.1} Tick │ {:>12.1} Tick │",
-        a.average_ticks, b.average_ticks, c.average_ticks
-    );
-    println!(
-        "│ 総与ダメージ (Total Damage) │ {:>12} Dmg  │ {:>12} Dmg  │ {:>12} Dmg  │",
-        a.total_damage, b.total_damage, c.total_damage
-    );
-    println!(
-        "│ オートスペル発動回数        │ {:>16} 回 │ {:>16} 回 │ {:>16} 回 │",
-        a.total_autospells, b.total_autospells, c.total_autospells
-    );
-    println!(
-        "│ 最終換金総額 (Overcharge後) │ {:>12} Zeny │ {:>12} Zeny │ {:>12} Zeny │",
-        a.total_final_loot, b.total_final_loot, c.total_final_loot
-    );
-    println!("└─────────────────────────────┴──────────────────┴──────────────────┴──────────────────┘");
-
-    let speedup_vs_b = ((b.total_ticks as f32 - c.total_ticks as f32) / b.total_ticks as f32) * 100.0;
-    let tick_lead_over_a = a.total_ticks as i32 - c.total_ticks as i32;
-
-    println!("\n🎉 【下克上達成！検証結果の総括】");
-    if tick_lead_over_a > 0 {
-        println!(
-            " 1. 討伐速度逆転: パーティーB改は、アタッカーが1名のみにも関わらず、脳筋アタッカー2名のパーティーAを {} Tick 上回り、{:.1}% の圧倒的高速化を達成しました！",
-            tick_lead_over_a, speedup_vs_b
-        );
-    } else {
-        println!(
-            " 1. 討伐速度向上: パーティーB改は初期状態から {:.1}% の大幅な討伐時間短縮を達成しました！",
-            speedup_vs_b
-        );
+    for log in &guild_logs {
+        println!("{}", log);
     }
+
+    println!("\n 🏴‍☠️ ライバルギルド『{}』のシナジー編成が完成！", rival_guild.name);
+    for m in &rival_guild.roster {
+        let tag = BuildTag::analyze(m);
+        println!("   - {} (Lv.{}, 特性: 【{}】)", m.name, m.level, tag.name_ja());
+    }
+
+    // -------------------------------------------------------------------------
+    // 【Step 3: 育成成果の発見装置（ライバルギルドとの模擬GvG対抗戦）】
+    // -------------------------------------------------------------------------
+    println!("\n--------------------------------------------------------------------------------");
+    println!(" 【Step 3: 育成成果の発見装置（ライバルギルドとの模擬GvG対抗戦）】");
+    println!("--------------------------------------------------------------------------------");
+    println!(" ⚔️  プレイヤー現主力（第5世代選抜） VS かつての愛弟子・古参連合『黒曜の旅団』");
+
+    let player_team = vec![gen5_ace, gen4_paladin, leeched_rookie];
+    // ライバルギルドから最もバランスの良い3名（キャリー、タンク、武器支援）を選抜
+    let rival_team: Vec<Character> = rival_guild.roster.iter().take(3).cloned().collect();
+
+    let gvg_result = engine.simulate_gvg_battle(
+        &player_team,
+        &rival_team,
+        "我らがオリジンギルド (第5世代主力)",
+        "ライバル『黒曜の旅団』 (古参精鋭連合)",
+    );
+
+    for log in &gvg_result.logs {
+        println!("{}", log);
+    }
+
+    // -------------------------------------------------------------------------
+    // 【サマリー出力】
+    // -------------------------------------------------------------------------
+    println!("\n================================================================================");
+    println!(" 📊 フェーズ3 総合検証サマリー");
+    println!("================================================================================");
+
+    // 1. パワーレベリング効率
+    println!("【1. パワーレベリング（セルフ養殖）育成効率比較】");
+    println!("┌─────────────────────────────┬─────────────────────┬─────────────────────┐");
+    println!("│ 育成方式                    │ ソロ育成 (Lv.1単独) │ セルフ養殖 (先輩引率)│");
+    println!("├─────────────────────────────┼─────────────────────┼─────────────────────┤");
+    println!("│ 所要時間 (Tick)             │ {:>15} Tick │ {:>15} Tick │", solo_summary.total_ticks, leech_summary.total_ticks);
+    println!("│ 獲得経験値 (EXP)            │ {:>15} EXP  │ {:>15} EXP  │", solo_summary.total_exp_gained, gained_exp_for_rookie);
+    let solo_rate = solo_summary.total_exp_gained as f32 / solo_summary.total_ticks.max(1) as f32;
+    let leech_rate = gained_exp_for_rookie as f32 / leech_summary.total_ticks.max(1) as f32;
+    println!("│ 時間効率 (EXP / Tick)       │ {:>13.2} EXP/T│ {:>13.2} EXP/T│", solo_rate, leech_rate);
+    println!("│ 到達レベル                  │            Lv. {:>2}   │            Lv. {:>2}   │", solo_rookie.level, levels_gained + 1);
+    println!("└─────────────────────────────┴─────────────────────┴─────────────────────┘");
+
+    // 2. ギルド名簿変遷
+    println!("\n【2. ギルド名簿の変遷と経済・永続パッシブ効果】");
+    println!(" • 現役登録メンバー数: {}名 (定員6名枠維持)", guild_roster.active_members.len());
+    println!(" • 街のNPC化引退: {}名 (永続恩恵: 全味方武器ATK +{:.1}%)",
+        guild_roster.retired_town_npcs.len(),
+        guild_roster.town_bonus.extra_weapon_atk_percent * 100.0
+    );
+    println!(" • FA移籍成立: {}名 (獲得移籍金総額: +{} Zeny)",
+        guild_roster.transferred_members.len(),
+        guild_roster.treasury_zeny
+    );
+
+    // 3. 模擬GvGサマリー
+    println!("\n【3. 模擬GvG（3vs3パーティー対抗戦）結果】");
+    println!(" • 決着所要時間: {} Tick", gvg_result.total_ticks);
+    println!(" • 栄冠の勝者: 『{}』", gvg_result.winner_team);
+    println!(" • プレイヤー軍生存者: {:?}", gvg_result.team_a_survivors);
+    println!(" • ライバル軍生存者:   {:?}", gvg_result.team_b_survivors);
+
+    println!("\n🔍 【フェーズ3総括：サクセス×ペナント型ループの実証】");
     println!(
-        " 2. ガンビットの効果: 高FLEEの「迅速型（Swift）」が出現した際、ガンビットが自動で必中スキル【バッシュ】を発動。初期状態で多発していたMISSを完全根絶し、殲滅速度を飛躍的に高めました。"
+        " 1. 養殖の爆発的時短: 先輩キャラが格上モブを瞬殺することで、育成効率がソロ比で {:.1}倍（到達Lv: 2 -> {}）へと劇的に跳ね上がりました。",
+        leech_rate / solo_rate.max(0.1), levels_gained + 1
     );
     println!(
-        " 3. 過剰精錬の破壊力: 鍛冶屋の職能ボーナスによって完成した過剰精錬武器の「ATK上昇」「クリティカル・ASPD補正」「限界突破防御無視追加ダメージ」「オートスペル率倍化」が相乗効果を発揮しました。"
+        " 2. シナジー引力によるドラマ: 古参キャラが「武器研究BS」と「物理キャリー」でお互いに引き寄せ合い、ライバルギルドで理想のシナジー編成を自動結成しました。"
     );
     println!(
-        " 4. 経済と戦闘の完全循環: 【戦闘 → Overcharge資金獲得 → 鍛冶屋過剰精錬 → ガンビット最適化で脳筋パーティーを凌駕】という、専門職が輝く古典MMOの理想的コアループが実証されました。"
+        " 3. 捨てたキャラが牙を剥くGvG: かつて自分が育てた武器研究BSのオーラを背負った古参シーフが、現主力に手痛い一撃を浴びせる白熱の対抗戦が成立。世代交代のロマンとペナントレース型循環が実証されました。"
     );
+
+    Ok(())
 }

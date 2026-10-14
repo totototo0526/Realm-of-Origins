@@ -1,0 +1,26 @@
+# Task: フェーズ3 - レガシー転生・パワーレベリング（セルフ養殖）・ライバルギルド結成の実装
+
+- [x] ドキュメント整備と初期設計 <!-- id: 0 -->
+    - [x] `docs/legacy_gvg/task.md` の作成 <!-- id: 1 -->
+    - [x] `docs/legacy_gvg/implementation_plan.md` の作成 <!-- id: 2 -->
+    - [x] `agent.md` の更新 <!-- id: 3 -->
+- [x] 経験値・レベルアップ・成長方針の実装 (`src/progression.rs`) <!-- id: 4 -->
+    - [x] 経験値分配とレベルアップテーブル <!-- id: 5 -->
+    - [x] ビルド育成方針 (`GrowthPlan`: AgiCrit, VitTank, DexLukCrafter, IntDexSupport) <!-- id: 6 -->
+    - [x] レガシー転生ボーナス（世代 `generation` に応じた初期ステータス加算） <!-- id: 7 -->
+- [x] ギルド名簿・FA移籍・シナジー引力の実装 (`src/guild.rs`) <!-- id: 8 -->
+    - [x] ギルド名簿 (`Roster`) と定員管理 <!-- id: 9 -->
+    - [x] ビルド特性タグ (`BuildTag`: PhysicalCarry, WeaponSupport, Tank, MagicSupport等) の自動判定 <!-- id: 10 -->
+    - [x] 稼働スコア (`activity_score`) とFA退団3択 (`Retain`, `RetireAsTownNpc`, `ApproveTransfer`) <!-- id: 11 -->
+    - [x] ライバルギルドの定義とシナジー引力による自動チーム形成 <!-- id: 12 -->
+- [x] 対人戦・模擬GvG（3vs3オートチェス）エンジンの実装 (`src/engine.rs`) <!-- id: 13 -->
+    - [x] キャラクター同士のPvP戦闘ループ（命中、防御、スキル、オートスペル、オーラ） <!-- id: 14 -->
+- [x] 4ステップ検証シナリオの実装 (`src/main.rs`) <!-- id: 15 -->
+    - [x] Step 1: パワーレベリング（セルフ養殖）実証（ソロ vs 先輩引率ハイオーク連戦） <!-- id: 16 -->
+    - [x] Step 2: 世代交代とFA移籍（シナジー引力によるライバルギルド結成） <!-- id: 17 -->
+    - [x] Step 3: 現主力（第5世代）vs 元愛弟子たちのライバルギルド（模擬GvG対抗戦） <!-- id: 18 -->
+    - [x] サマリー出力（養殖効率比較、名簿変遷、GvG結果） <!-- id: 19 -->
+- [x] 検証とウォークスルー作成 <!-- id: 20 -->
+    - [x] `cargo check`, `cargo run` での動作確認 <!-- id: 21 -->
+    - [x] `docs/legacy_gvg/walkthrough.md` の作成 <!-- id: 22 -->
+    - [x] `agent.md`, `README_DEV.md` の更新 <!-- id: 23 -->
