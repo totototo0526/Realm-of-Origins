@@ -1,0 +1,31 @@
+# Task: フェーズ2 - 簡易ガンビットと過剰精錬（クホホ工場）の実装
+
+- [x] ドキュメント整備と初期設計 <!-- id: 0 -->
+    - [x] `docs/gambit_refinery/task.md` の作成 <!-- id: 1 -->
+    - [x] `docs/gambit_refinery/implementation_plan.md` の作成 <!-- id: 2 -->
+    - [x] `agent.md` の更新 <!-- id: 3 -->
+- [x] データモデル拡張 (`src/models.rs`, `mods/core/`) <!-- id: 4 -->
+    - [x] `Equipment`: `refine`, `slots`, `is_locked` フィールドの拡張 <!-- id: 5 -->
+    - [x] `Skill`: `is_sure_hit`, `physical_multiplier` フィールドの追加 <!-- id: 6 -->
+    - [x] ガンビットモデル (`Condition`, `Action`, `GambitRule`) の定義 <!-- id: 7 -->
+    - [x] `Character`: `gambit_rules` フィールドの追加 <!-- id: 8 -->
+    - [x] `mods/core/skills.ron`: 必中強撃スキル（`bash`等）の追加 <!-- id: 9 -->
+- [x] ワークオーダー式過剰精錬システムの実装 (`src/refinery.rs`) <!-- id: 10 -->
+    - [x] 精錬成功率テーブル（安全圏+1〜+4は100%、+5以降漸減） <!-- id: 11 -->
+    - [x] 鍛冶屋のステータス（DEX/LUK極振り）による成功率底上げシナジー <!-- id: 12 -->
+    - [x] 限界突破ボーナス（+7クリティカル/ASPD、+10防御無視ダメージ/AS発動率2倍） <!-- id: 13 -->
+    - [x] 「クホホ……」失敗ロスト処理と、希少品ロック（`is_locked`）安全装置 <!-- id: 14 -->
+    - [x] バッチ指示（`WorkOrder`）による自動過剰精錬プロセスの実装 <!-- id: 15 -->
+- [x] 戦闘エンジン (`src/engine.rs`) のガンビット＆精錬ボーナス対応 <!-- id: 16 -->
+    - [x] ガンビットルール評価処理（敵のArchetypeやHP条件に応じた行動決定） <!-- id: 17 -->
+    - [x] 必中アクティブスキル（高FLEE無効化）の実行とログ出力 <!-- id: 18 -->
+    - [x] 過剰精錬限界突破ボーナス（+7, +10）のダメージ＆オートスペル率反映 <!-- id: 19 -->
+- [x] 3ステップ検証シナリオの実装 (`src/main.rs`) <!-- id: 20 -->
+    - [x] Step 1: 初期狩り（資金・ベース武器獲得） <!-- id: 21 -->
+    - [x] Step 2: 全自動クホホ工場の稼働（20本投入、+10目標バッチ精錬、完成品カード装着＆ロック） <!-- id: 22 -->
+    - [x] Step 3: 過剰精錬武器＋対迅速型ガンビットによる下克上再挑戦 <!-- id: 23 -->
+    - [x] 3列比較サマリー（パーティーA vs パーティーB vs パーティーB改）の出力 <!-- id: 24 -->
+- [x] 検証とウォークスルー作成 <!-- id: 25 -->
+    - [x] `cargo check`, `cargo run` による動作検証 <!-- id: 26 -->
+    - [x] `docs/gambit_refinery/walkthrough.md` の作成 <!-- id: 27 -->
+    - [x] `agent.md`, `README_DEV.md` の更新 <!-- id: 28 -->

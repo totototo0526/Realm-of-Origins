@@ -1,0 +1,86 @@
+[
+    (
+        id: "weapon_research",
+        name: "武器研究",
+        level: 10,
+        sp_cost: 0,
+        magic_multiplier: None,
+        physical_multiplier: None,
+        is_sure_hit: false,
+        modifiers: [
+            (
+                id: "weapon_research_aura",
+                name: "陣形武器研究オーラ",
+                trigger: PartyAura,
+                effect: PartyWeaponResearch(
+                    base_bonus: 0.15,
+                    scaling_stats: [
+                        Dex,
+                        Luk,
+                    ],
+                ),
+            ),
+        ],
+    ),
+    (
+        id: "overcharge",
+        name: "オーバーチャージ(商才)",
+        level: 10,
+        sp_cost: 0,
+        magic_multiplier: None,
+        physical_multiplier: None,
+        is_sure_hit: false,
+        modifiers: [
+            (
+                id: "overcharge_bonus",
+                name: "高額換金術",
+                trigger: OnBattleEnd,
+                effect: OverchargeBonus(
+                    base_bonus: 0.24,
+                    scaling_stat: Luk,
+                ),
+            ),
+        ],
+    ),
+    (
+        id: "fire_bolt",
+        name: "ファイアーボルト",
+        level: 3,
+        sp_cost: 15,
+        magic_multiplier: Some(3.0),
+        physical_multiplier: None,
+        is_sure_hit: true,
+        modifiers: [],
+    ),
+    (
+        id: "iron_defense",
+        name: "アイアンディフェンス",
+        level: 5,
+        sp_cost: 0,
+        magic_multiplier: None,
+        physical_multiplier: None,
+        is_sure_hit: false,
+        modifiers: [
+            (
+                id: "knight_def_aura",
+                name: "鉄壁の陣",
+                trigger: Passive,
+                effect: StatBonus(
+                    stat: Vit,
+                    flat: 15,
+                    percent: 0.15,
+                ),
+            ),
+        ],
+    ),
+    (
+        id: "bash",
+        name: "バッシュ(必中強撃)",
+        level: 10,
+        sp_cost: 15,
+        magic_multiplier: None,
+        physical_multiplier: Some(2.6),
+        is_sure_hit: true,
+        modifiers: [],
+    ),
+]

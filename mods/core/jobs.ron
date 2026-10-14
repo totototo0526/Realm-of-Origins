@@ -1,0 +1,59 @@
+[
+    (
+        id: "thief",
+        name: "シーフ",
+        base_hp: 900,
+        hp_factor: 1.0,
+        base_aspd: 165.0,
+        modifiers: [
+            (
+                id: "thief_passive",
+                name: "回避修練",
+                trigger: Passive,
+                effect: StatBonus(
+                    stat: Agi,
+                    flat: 5,
+                    percent: 0.05,
+                ),
+            ),
+        ],
+    ),
+    (
+        id: "knight",
+        name: "ナイト",
+        base_hp: 2600,
+        hp_factor: 1.5,
+        base_aspd: 145.0,
+        modifiers: [
+            (
+                id: "knight_passive",
+                name: "体力増強",
+                trigger: Passive,
+                effect: StatBonus(
+                    stat: Vit,
+                    flat: 10,
+                    percent: 0.10,
+                ),
+            ),
+        ],
+    ),
+    (
+        id: "blacksmith",
+        name: "ブラックスミス(商人)",
+        base_hp: 1400,
+        hp_factor: 1.1,
+        base_aspd: 150.0,
+        modifiers: [
+            (
+                id: "merchant_passive",
+                name: "職人魂",
+                trigger: Passive,
+                effect: StatBonus(
+                    stat: Dex,
+                    flat: 5,
+                    percent: 0.05,
+                ),
+            ),
+        ],
+    ),
+]

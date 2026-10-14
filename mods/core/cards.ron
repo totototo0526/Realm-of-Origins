@@ -1,0 +1,70 @@
+[
+    (
+        id: "hydra_card",
+        name: "ヒドラカード",
+        slot: Weapon,
+        modifiers: [
+            (
+                id: "hydra_demihuman_killer",
+                name: "人間・亜人特化",
+                trigger: Passive,
+                effect: RaceDamageBonus(
+                    race: Demihuman,
+                    percent: 0.20,
+                ),
+            ),
+        ],
+    ),
+    (
+        id: "flame_eye_card",
+        name: "炎眼のカード",
+        slot: Weapon,
+        modifiers: [
+            (
+                id: "autospell_firebolt",
+                name: "オートスペル(ファイアーボルトLv3)",
+                trigger: OnNormalAttackHit(
+                    chance: 0.25,
+                ),
+                effect: AutoSpell(
+                    skill_id: "fire_bolt",
+                    level: 3,
+                ),
+            ),
+        ],
+    ),
+    (
+        id: "andre_card",
+        name: "アンドレカード",
+        slot: Weapon,
+        modifiers: [
+            (
+                id: "andre_atk",
+                name: "剛力",
+                trigger: Passive,
+                effect: StatBonus(
+                    stat: Str,
+                    flat: 5,
+                    percent: 0.0,
+                ),
+            ),
+        ],
+    ),
+    (
+        id: "pecopeco_card",
+        name: "ペコペコカード",
+        slot: Armor,
+        modifiers: [
+            (
+                id: "pecopeco_vit",
+                name: "生命力強化",
+                trigger: Passive,
+                effect: StatBonus(
+                    stat: Vit,
+                    flat: 10,
+                    percent: 0.10,
+                ),
+            ),
+        ],
+    ),
+]

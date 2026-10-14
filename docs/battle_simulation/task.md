@@ -1,0 +1,24 @@
+# Task: 古典的MMORPG風 ヘッドレス戦闘＆経済シミュレーターの初期実装
+
+- [x] ドキュメント整備と初期設計 <!-- id: 0 -->
+    - [x] `agent.md`, `README_DEV.md` の作成 <!-- id: 1 -->
+    - [x] `task.md`, `implementation_plan.md` の作成 <!-- id: 2 -->
+- [x] プロジェクト初期化と依存関係設定 <!-- id: 3 -->
+    - [x] `Cargo.toml` の設定 (`serde`, `ron`, `rand`) <!-- id: 4 -->
+- [x] データ定義とローダー実装 (`models.rs`, `loader.rs`, `mods/core/`) <!-- id: 5 -->
+    - [x] `src/models.rs`: 基礎ステータス、戦闘パラメータ、Modifier、Trigger、Effect、Character、MonsterTemplate、Archetype等 <!-- id: 6 -->
+    - [x] `mods/core/`: RONデータ作成 (`jobs.ron`, `cards.ron`, `skills.ron`, `monsters.ron`) <!-- id: 7 -->
+    - [x] `src/loader.rs`: RONファイルの読み込み・パース処理 <!-- id: 8 -->
+- [x] シミュレーションエンジン実装 (`engine.rs`) <!-- id: 9 -->
+    - [x] ステータス算出（ATK, ASPD, HIT, FLEE, CRIT, DEF） <!-- id: 10 -->
+    - [x] パーティーオーラ・シナジー（WeaponResearch, Overcharge）計算 <!-- id: 11 -->
+    - [x] Tickベース戦闘ループ、ヘイト管理、HIT/FLEE判定、CRIT判定、ダメージ計算、AutoSpell発動 <!-- id: 12 -->
+    - [x] 戦闘終了時ドロップ判定とOvercharge換金処理 <!-- id: 13 -->
+- [x] シミュレーション実行と結果比較表示 (`main.rs`) <!-- id: 14 -->
+    - [x] モンスター個体差（Archetype）スポーン処理 <!-- id: 15 -->
+    - [x] パーティーA（脳筋構成）とパーティーB（専門職シナジー構成）の10連戦実行 <!-- id: 16 -->
+    - [x] 詳細戦闘ログとサマリー比較のコンソール出力 <!-- id: 17 -->
+- [x] 動作確認とウォークスルー作成 <!-- id: 18 -->
+    - [x] `cargo check`, `cargo run` での正常動作確認 <!-- id: 19 -->
+    - [x] `docs/battle_simulation/walkthrough.md` の作成 <!-- id: 20 -->
+    - [x] `agent.md`, `README_DEV.md` の更新 <!-- id: 21 -->
