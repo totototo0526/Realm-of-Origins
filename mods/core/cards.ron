@@ -67,4 +67,38 @@
             ),
         ],
     ),
+    (
+        id: "soldier_skel_card",
+        name: "ソルジャースケルトンカード",
+        slot: Weapon,
+        modifiers: [
+            (
+                id: "soldier_skel_crit",
+                name: "会心の鋭刃",
+                trigger: Passive,
+                effect: StatBonus(
+                    stat: Luk,
+                    flat: 25,
+                    percent: 0.0,
+                ),
+            ),
+        ],
+    ),
+    (
+        id: "drainliar_card",
+        name: "ドレインリアーカード",
+        slot: Weapon,
+        modifiers: [
+            (
+                id: "drainliar_brute_killer",
+                name: "動物特化",
+                trigger: Passive,
+                effect: RaceDamageBonus(
+                    race: Brute,
+                    percent: 0.20,
+                ),
+            ),
+        ],
+    ),
 ]
+

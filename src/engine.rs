@@ -271,6 +271,11 @@ pub struct SpatialBattleSession {
     pub overcharge_mult: f32,
     pub snapshot_trigger_count: u32,
     pub ascii_snapshots: Vec<String>,
+    pub total_attacks: u32,
+    pub total_hits: u32,
+    pub total_crits: u32,
+    pub physical_damage: u64,
+    pub ranged_magic_damage: u64,
 }
 
 impl SpatialBattleSession {
@@ -307,6 +312,11 @@ impl SpatialBattleSession {
             overcharge_mult,
             snapshot_trigger_count: 0,
             ascii_snapshots: Vec::new(),
+            total_attacks: 0,
+            total_hits: 0,
+            total_crits: 0,
+            physical_damage: 0,
+            ranged_magic_damage: 0,
         }
     }
 
@@ -341,6 +351,12 @@ impl SpatialBattleSession {
             &mut self.team_b,
             &mut occupied_hexes,
             &mut self.total_damage,
+            &mut self.total_attacks,
+            &mut self.total_hits,
+            &mut self.total_crits,
+            &mut self.physical_damage,
+            &mut self.ranged_magic_damage,
+            true,
             &mut self.logs,
             &mut events,
             db,
@@ -348,6 +364,11 @@ impl SpatialBattleSession {
         );
 
         // 2. Team B のターン
+        let mut dummy_attacks = 0;
+        let mut dummy_hits = 0;
+        let mut dummy_crits = 0;
+        let mut dummy_phys = 0;
+        let mut dummy_ranged = 0;
         Self::process_team_turn(
             self.current_tick,
             &self.map,
@@ -355,6 +376,12 @@ impl SpatialBattleSession {
             &mut self.team_a,
             &mut occupied_hexes,
             &mut self.total_damage,
+            &mut dummy_attacks,
+            &mut dummy_hits,
+            &mut dummy_crits,
+            &mut dummy_phys,
+            &mut dummy_ranged,
+            false,
             &mut self.logs,
             &mut events,
             db,
@@ -419,6 +446,12 @@ impl SpatialBattleSession {
         targets: &mut [Combatant],
         occupied_hexes: &mut HashSet<HexCoord>,
         total_damage: &mut u64,
+        total_attacks: &mut u32,
+        total_hits: &mut u32,
+        total_crits: &mut u32,
+        physical_damage: &mut u64,
+        ranged_magic_damage: &mut u64,
+        is_team_a: bool,
         logs: &mut Vec<String>,
         events: &mut Vec<BattleVisualEvent>,
         db: &ModDatabase,
@@ -597,6 +630,9 @@ impl SpatialBattleSession {
 
                         let mut hit_count = 0;
                         for &t_idx in &aoe_targets {
+                            if is_team_a {
+                                *total_attacks += 1;
+                            }
                             let t = &mut targets[t_idx];
                             let hit_rate = if is_sure || is_magic {
                                 100
@@ -620,6 +656,15 @@ impl SpatialBattleSession {
                                 actors[a_idx].total_damage_dealt += final_dmg as u64;
                                 *total_damage += final_dmg as u64;
                                 hit_count += 1;
+
+                                if is_team_a {
+                                    *total_hits += 1;
+                                    if is_magic || req_range > 1 {
+                                        *ranged_magic_damage += final_dmg as u64;
+                                    } else {
+                                        *physical_damage += final_dmg as u64;
+                                    }
+                                }
 
                                 events.push(BattleVisualEvent::DamageDealt {
                                     attacker_id: actor_id.clone(),
@@ -690,6 +735,9 @@ impl SpatialBattleSession {
                         }
                     } else {
                         // 通常攻撃
+                        if is_team_a {
+                            *total_attacks += 1;
+                        }
                         let t = &mut targets[target_idx];
                         let is_crit = rng.gen_range(0.0..100.0) < c_stats.crit;
                         let hit_rate = if is_crit {
@@ -707,6 +755,18 @@ impl SpatialBattleSession {
                             t.stats.current_hp -= final_dmg as i32;
                             actors[a_idx].total_damage_dealt += final_dmg as u64;
                             *total_damage += final_dmg as u64;
+
+                            if is_team_a {
+                                *total_hits += 1;
+                                if is_crit {
+                                    *total_crits += 1;
+                                }
+                                if actors[a_idx].attack_range > 1 {
+                                    *ranged_magic_damage += final_dmg as u64;
+                                } else {
+                                    *physical_damage += final_dmg as u64;
+                                }
+                            }
 
                             events.push(BattleVisualEvent::DamageDealt {
                                 attacker_id: actor_id.clone(),

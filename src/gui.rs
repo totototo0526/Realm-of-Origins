@@ -5,10 +5,11 @@ use crate::engine::{BattleVisualEvent, Combatant, SimulationEngine, SpatialBattl
 use crate::hex_grid::{HexCoord, HexMap};
 use crate::loader::ModDatabase;
 use crate::models::{
-    Action, Card, Character, Condition, EquipSlot, Equipment, FormationRole,
-    MonsterArchetype,
+    Action, Character, Condition, EquipSlot, Equipment, FormationRole,
+    MonsterArchetype, StatType,
 };
 use crate::progression::{GrowthPlan, Progression};
+use crate::guild::BuildTag;
 use crate::refinery::{Refinery, WorkOrder, WorkOrderMode};
 use crate::world::WorldState;
 
@@ -149,6 +150,14 @@ pub struct GuiApp {
     pub origin_x: f32,
     pub origin_y: f32,
     pub hex_size: f32,
+    // フェーズ9追加: Auto-Wave連戦 ＆ ビルド実験・生態系適応
+    pub auto_wave: bool,
+    pub current_wave: u32,
+    pub wave_transition_timer: Option<f32>,
+    pub selected_member_idx: usize, // 0: 主人公, 1: 同行者A, 2: 同行者B
+    pub ecosystem_shift_warning: Option<String>,
+    pub selected_rival_guild: usize, // 0: 黒曜の旅団, 1: 黄金の盾, 2: 灰燼の学派
+    pub available_cards: Vec<String>,
 }
 
 impl GuiApp {
@@ -196,6 +205,19 @@ impl GuiApp {
             origin_x: 270.0,
             origin_y: 190.0,
             hex_size: 28.0,
+            auto_wave: false,
+            current_wave: 1,
+            wave_transition_timer: None,
+            selected_member_idx: 0,
+            ecosystem_shift_warning: None,
+            selected_rival_guild: 0,
+            available_cards: vec![
+                "hydra_card".to_string(),
+                "flame_eye_card".to_string(),
+                "soldier_skel_card".to_string(),
+                "drainliar_card".to_string(),
+                "andre_card".to_string(),
+            ],
         }
     }
 
@@ -530,6 +552,111 @@ impl GuiApp {
                 }
             }
         }
+
+        // Auto-Wave連戦のトリガー判定（敵全滅かつAuto-WaveがONの場合）
+        if self.auto_wave {
+            if let Some(ref session) = self.session {
+                if session.is_finished && session.is_victory && session.is_monster_battle {
+                    if self.wave_transition_timer.is_none() {
+                        self.wave_transition_timer = Some(2.0);
+                        self.chat_logs.push(format!(
+                            "[Auto-Wave] Wave {} 撃退成功！ 2秒後に次のモンスター群（Wave {}）が襲来します...",
+                            self.current_wave,
+                            self.current_wave + 1
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Auto-Waveインターバルタイマーの進行
+        if let Some(ref mut timer) = self.wave_transition_timer {
+            *timer -= dt;
+            if *timer <= 0.0 {
+                self.wave_transition_timer = None;
+                self.spawn_next_wave();
+            }
+        }
+    }
+
+    /// 次のWaveを自動生成（生態系シフトSolver連動 ＆ ワールドターン進行）
+    pub fn spawn_next_wave(&mut self) {
+        self.current_wave += 1;
+
+        let last_ticks = if let Some(ref s) = self.session {
+            s.current_tick
+        } else {
+            100
+        };
+
+        // ワールドターンを進行（裏の自動派遣・BOM市場相場・ライバルギルドリーグ戦を前進）
+        let turn_logs = self.world.advance_turn(last_ticks, &self.db);
+        for l in turn_logs {
+            self.chat_logs.push(l);
+        }
+
+        // 直前の戦闘セッションから物理偏重 vs 遠距離/魔法偏重を解析（生態系シフトSolver）
+        let (phys_dmg, ranged_dmg) = if let Some(ref s) = self.session {
+            (s.physical_damage, s.ranged_magic_damage)
+        } else {
+            (0, 0)
+        };
+
+        let (heavy_ratio, _swift_ratio, shift_msg) = if phys_dmg >= (ranged_dmg * 2).max(100) {
+            (
+                0.75,
+                0.25,
+                Some("[!] 生態系シフト: 敵が物理対策（重装型・高DEF増加）を開始しました！".to_string()),
+            )
+        } else if ranged_dmg >= (phys_dmg * 2).max(100) {
+            (
+                0.25,
+                0.75,
+                Some("[!] 生態系シフト: 敵が遠距離対策（迅速型・高回避増加）を開始しました！".to_string()),
+            )
+        } else {
+            (0.5, 0.5, None)
+        };
+
+        self.ecosystem_shift_warning = shift_msg.clone();
+        if let Some(msg) = shift_msg {
+            self.chat_logs.push(msg);
+        }
+
+        let engine = SimulationEngine::new(&self.db);
+        let map = HexMap::create_chokepoint_map();
+        let party = self.get_player_party();
+
+        let t_high_orc = self.db.monsters.get("high_orc").expect("high_orc exists");
+        let t_orc = self.db.monsters.get("orc_warrior").expect("orc_warrior exists");
+
+        // Wave数に応じた出現数（Wave 1..2: 2体, Wave 3..5: 3体, Wave 6+: 4体）
+        let monster_count = if self.current_wave <= 2 {
+            2
+        } else if self.current_wave <= 5 {
+            3
+        } else {
+            4
+        };
+
+        let mut monsters = Vec::new();
+        for i in 0..monster_count {
+            let is_heavy = (i as f32 / monster_count as f32) < heavy_ratio;
+            let archetype = if is_heavy {
+                MonsterArchetype::Heavy
+            } else {
+                MonsterArchetype::Swift
+            };
+            let template = if is_heavy { t_high_orc } else { t_orc };
+            monsters.push(engine.spawn_monster(template, archetype));
+        }
+
+        self.session = Some(engine.create_chokepoint_session(map, &party, &monsters));
+        self.chat_logs.push(format!(
+            "[Auto-Wave] ★ Wave {} 開始！ 敵モンスター群（{}体）が侵攻！ (ワールドターン進行済)",
+            self.current_wave,
+            monsters.len()
+        ));
     }
 
     /// 戦闘イベントを弾道パーティクルや視覚エフェクトに変換
@@ -895,6 +1022,77 @@ impl GuiApp {
                 self.draw_text_helper(&ft.text, ft.x, ft.y, size, c);
             }
         }
+
+        // 10. 戦場上部HUD：メトリクスバー ＆ Auto-Wave ＆ 生態系シフトバナー
+        self.draw_battlefield_metrics_bar();
+    }
+
+    /// 戦場上部のリアルタイムDPS/時給メトリクスバーおよびAuto-Waveトグルの描画
+    fn draw_battlefield_metrics_bar(&mut self) {
+        let (tick, total_dmg, exp, attacks, hits, crits) = if let Some(ref s) = self.session {
+            (
+                s.current_tick,
+                s.total_damage,
+                s.gained_exp,
+                s.total_attacks,
+                s.total_hits,
+                s.total_crits,
+            )
+        } else {
+            (0, 0, 0, 0, 0, 0)
+        };
+
+        let dps = if tick > 0 { total_dmg as f32 / tick as f32 } else { 0.0 };
+        let exp_rate = if tick > 0 { (exp as f32 / tick as f32) * 100.0 } else { 0.0 };
+        let hit_rate = if attacks > 0 { (hits as f32 / attacks as f32) * 100.0 } else { 100.0 };
+        let crit_rate = if attacks > 0 { (crits as f32 / attacks as f32) * 100.0 } else { 0.0 };
+
+        // メトリクスバー背景
+        let bar_x = 12.0;
+        let bar_y = 10.0;
+        let bar_w = 806.0;
+        let bar_h = 30.0;
+
+        draw_rectangle(bar_x, bar_y, bar_w, bar_h, Color::new(0.08, 0.10, 0.15, 0.92));
+        draw_rectangle_lines(bar_x, bar_y, bar_w, bar_h, 1.0, Color::new(0.25, 0.35, 0.45, 0.8));
+
+        // Wave数
+        self.draw_text_helper(&format!("[Wave {}]", self.current_wave), bar_x + 8.0, bar_y + 20.0, 14.0, Color::new(1.0, 0.85, 0.2, 1.0));
+
+        // DPS
+        self.draw_text_helper(&format!("DPS: {:.1}", dps), bar_x + 82.0, bar_y + 20.0, 12.0, Color::new(0.9, 0.95, 1.0, 0.95));
+
+        // EXP時給 (EXP/100T)
+        self.draw_text_helper(&format!("EXP: {:.0}/100T", exp_rate), bar_x + 178.0, bar_y + 20.0, 12.0, Color::new(0.4, 0.9, 0.6, 0.95));
+
+        // 命中率
+        self.draw_text_helper(&format!("命中: {:.1}%", hit_rate), bar_x + 295.0, bar_y + 20.0, 12.0, Color::new(0.8, 0.85, 0.95, 0.9));
+
+        // 会心率
+        self.draw_text_helper(&format!("会心: {:.1}%", crit_rate), bar_x + 395.0, bar_y + 20.0, 12.0, Color::new(1.0, 0.7, 0.3, 0.9));
+
+        // 次Waveカウントダウン表示
+        if let Some(timer) = self.wave_transition_timer {
+            self.draw_text_helper(&format!("(次群まで {:.1}s)", timer), bar_x + 485.0, bar_y + 20.0, 11.5, Color::new(1.0, 0.4, 0.4, 1.0));
+        }
+
+        // Auto-Waveトグルボタン
+        let btn_label = if self.auto_wave { "[Auto-Wave: ON]" } else { "[Auto-Wave: OFF]" };
+        let btn_color = if self.auto_wave { Color::new(0.12, 0.45, 0.28, 1.0) } else { Color::new(0.22, 0.25, 0.30, 1.0) };
+        if self.draw_button(Rect::new(bar_x + bar_w - 138.0, bar_y + 3.0, 130.0, 24.0), btn_label, self.auto_wave, btn_color) {
+            self.auto_wave = !self.auto_wave;
+            let status_str = if self.auto_wave { "有効(ON)にしました。敵全滅後に自動で次Waveがスポーンします。" } else { "停止(OFF)にしました。" };
+            self.chat_logs.push(format!("[Auto-Wave] 連戦モードを{}", status_str));
+        }
+
+        // 生態系シフト警告バナー（存在する場合）
+        if let Some(ref shift_msg) = self.ecosystem_shift_warning {
+            let banner_y = bar_y + bar_h + 4.0;
+            let banner_h = 22.0;
+            draw_rectangle(bar_x, banner_y, bar_w, banner_h, Color::new(0.25, 0.12, 0.05, 0.90));
+            draw_rectangle_lines(bar_x, banner_y, bar_w, banner_h, 1.0, Color::new(0.8, 0.45, 0.1, 0.8));
+            self.draw_text_helper(shift_msg, bar_x + 10.0, banner_y + 15.0, 12.0, Color::new(1.0, 0.75, 0.3, 1.0));
+        }
     }
 
     /// 六角形タイルの描画（クォータービュー圧縮: y比率0.58）
@@ -1237,65 +1435,144 @@ impl GuiApp {
         draw_line(sx, y, sx + sw, y, 1.0, Color::new(0.3, 0.4, 0.5, 0.5));
         y += 8.0;
 
-        // 2. 選択中ユニットのステータスとインタラクティブ編成
-        self.draw_text_helper("◆ ユニット編成 ＆ 作戦カスタマイズ:", sx, y + 14.0, 13.5, Color::new(0.9, 0.9, 0.5, 1.0));
+        // 2. 編集対象メンバー切り替え ＆ 手動ステ振り・作戦カスタマイズ
+        self.draw_text_helper("◆ パーティー編成 ＆ ビルド実験 (ステ振り/作戦):", sx, y + 14.0, 13.5, Color::new(0.9, 0.9, 0.5, 1.0));
         y += 22.0;
 
-        let unit_info = if let Some(ref session) = self.session {
-            let u_opt = if let Some((is_team_a, idx)) = self.selected_unit {
-                if is_team_a { session.team_a.get(idx) } else { session.team_b.get(idx) }
+        // メンバー選択タブ（3名）
+        let member_labels = [
+            format!("1. 主人公: {}", self.world.active_character.name),
+            if let Some(m) = self.world.party_members.get(0) {
+                format!("2. 同行: {}", m.name)
             } else {
-                session.team_a.first()
-            };
-            u_opt.map(|u| {
-                (
-                    u.character.id.clone(),
-                    u.character.name.clone(),
-                    u.character.job_id.clone(),
-                    u.character.level,
-                    u.attack_range,
-                    u.stats.current_hp,
-                    u.stats.max_hp,
-                    u.stats.min_atk,
-                    u.stats.max_atk,
-                    u.stats.equip_def,
-                    u.stats.vit_def,
-                    u.stats.hit,
-                    u.stats.flee,
-                    u.stats.crit,
-                    u.stats.aspd,
-                    u.character.formation.role,
-                )
-            })
-        } else {
-            None
+                "2. 同行A (空き)".to_string()
+            },
+            if let Some(m) = self.world.party_members.get(1) {
+                format!("3. 同行: {}", m.name)
+            } else {
+                "3. 同行B (空き)".to_string()
+            },
+        ];
+
+        let m_btn_w = (sw - 8.0) / 3.0;
+        for i in 0..3 {
+            let bx = sx + i as f32 * (m_btn_w + 4.0);
+            let is_sel = self.selected_member_idx == i;
+            if self.draw_button(Rect::new(bx, y, m_btn_w, 24.0), &member_labels[i], is_sel, Color::new(0.20, 0.28, 0.38, 1.0)) {
+                self.selected_member_idx = i;
+            }
+        }
+        y += 28.0;
+
+        let target_char_opt = match self.selected_member_idx {
+            0 => Some(self.world.active_character.clone()),
+            1 => self.world.party_members.get(0).cloned(),
+            2 => self.world.party_members.get(1).cloned(),
+            _ => None,
         };
 
-        if let Some((
-            char_id,
-            char_name,
-            char_job,
-            char_level,
-            attack_range,
-            cur_hp,
-            max_hp,
-            min_atk,
-            max_atk,
-            equip_def,
-            vit_def,
-            hit,
-            flee,
-            crit,
-            aspd,
-            role,
-        )) = unit_info
-        {
-            self.draw_text_helper(&format!("名前: {} ({}) | Lv.{} | 射程: {}", char_name, char_job, char_level, attack_range), sx, y + 14.0, 13.0, WHITE);
+        if let Some(target_char) = target_char_opt {
+            let char_id = target_char.id.clone();
+            let char_name = target_char.name.clone();
+
+            // セッション中の最新戦闘ステータスを取得（なければエンジンで計算）
+            let c_stats = if let Some(ref session) = self.session {
+                session.team_a.iter().find(|u| u.character.id == char_id).map(|u| u.stats.clone())
+            } else {
+                None
+            }.unwrap_or_else(|| {
+                let engine = SimulationEngine::new(&self.db);
+                engine.calculate_combat_stats(&target_char, 1.0)
+            });
+
+            let wep = target_char.equipments.iter().find(|e| e.slot == EquipSlot::Weapon);
+            let wep_name = wep.map(|w| format!("+{} {}", w.refine, w.name)).unwrap_or_else(|| "素手".to_string());
+            let wep_range = wep.map(|w| w.attack_range).unwrap_or(1);
+
+            self.draw_text_helper(
+                &format!("名前: {} ({}) | Lv.{} | 武器: {}", char_name, target_char.job_id, target_char.level, wep_name),
+                sx, y + 14.0, 13.0, WHITE
+            );
             y += 18.0;
-            self.draw_text_helper(&format!("HP: {}/{} | ATK: {}〜{} | DEF: {}+{}", cur_hp, max_hp, min_atk, max_atk, equip_def, vit_def), sx, y + 14.0, 11.5, Color::new(0.8, 0.9, 1.0, 0.9));
+            self.draw_text_helper(
+                &format!("HP: {}/{} | ATK: {}〜{} | DEF: {}+{} | 射程: {}",
+                    c_stats.current_hp, c_stats.max_hp, c_stats.min_atk, c_stats.max_atk, c_stats.equip_def, c_stats.vit_def, wep_range
+                ),
+                sx, y + 14.0, 11.5, Color::new(0.8, 0.9, 1.0, 0.9)
+            );
             y += 18.0;
-            self.draw_text_helper(&format!("HIT: {} | FLEE: {} | CRIT: {:.1}% | ASPD: {:.1}", hit, flee, crit, aspd), sx, y + 14.0, 11.5, Color::new(0.8, 0.9, 1.0, 0.9));
+            self.draw_text_helper(
+                &format!("HIT: {} | FLEE: {} | CRIT: {:.1}% | ASPD: {:.1}",
+                    c_stats.hit, c_stats.flee, c_stats.crit, c_stats.aspd
+                ),
+                sx, y + 14.0, 11.5, Color::new(0.8, 0.9, 1.0, 0.9)
+            );
             y += 24.0;
+
+            // 手動ステータス割り振り（ビルド実験）UI
+            self.draw_text_helper("手動ステ振り (リアルタイム計算):", sx, y + 12.0, 12.0, Color::new(1.0, 0.85, 0.4, 1.0));
+            let mut reset_requested = false;
+            if self.draw_button(Rect::new(sx + sw - 72.0, y, 72.0, 20.0), "[再振り]", false, Color::new(0.35, 0.20, 0.20, 1.0)) {
+                reset_requested = true;
+            }
+            y += 22.0;
+
+            let mut stat_delta: Option<(StatType, i32)> = None;
+            let stat_list = [
+                ("STR", StatType::Str, target_char.base_stats.get(StatType::Str)),
+                ("AGI", StatType::Agi, target_char.base_stats.get(StatType::Agi)),
+                ("VIT", StatType::Vit, target_char.base_stats.get(StatType::Vit)),
+                ("INT", StatType::Int, target_char.base_stats.get(StatType::Int)),
+                ("DEX", StatType::Dex, target_char.base_stats.get(StatType::Dex)),
+                ("LUK", StatType::Luk, target_char.base_stats.get(StatType::Luk)),
+            ];
+
+            let col_w = (sw - 10.0) / 2.0;
+            for i in 0..3 {
+                let ls = &stat_list[i];
+                let rs = &stat_list[i + 3];
+
+                // 左カラム
+                let lx = sx;
+                self.draw_text_helper(&format!("{}: {:>3}", ls.0, ls.2), lx, y + 14.0, 12.0, WHITE);
+                if self.draw_button(Rect::new(lx + 68.0, y, 32.0, 18.0), "+1", false, Color::new(0.18, 0.25, 0.35, 1.0)) {
+                    stat_delta = Some((ls.1, 1));
+                }
+                if self.draw_button(Rect::new(lx + 104.0, y, 38.0, 18.0), "+10", false, Color::new(0.25, 0.30, 0.45, 1.0)) {
+                    stat_delta = Some((ls.1, 10));
+                }
+
+                // 右カラム
+                let rx = sx + col_w + 10.0;
+                self.draw_text_helper(&format!("{}: {:>3}", rs.0, rs.2), rx, y + 14.0, 12.0, WHITE);
+                if self.draw_button(Rect::new(rx + 68.0, y, 32.0, 18.0), "+1", false, Color::new(0.18, 0.25, 0.35, 1.0)) {
+                    stat_delta = Some((rs.1, 1));
+                }
+                if self.draw_button(Rect::new(rx + 104.0, y, 38.0, 18.0), "+10", false, Color::new(0.25, 0.30, 0.45, 1.0)) {
+                    stat_delta = Some((rs.1, 10));
+                }
+
+                y += 22.0;
+            }
+
+            // 極振りボタン群（STR極, AGI極, VIT極, INT極, DEX極, LUK極）
+            y += 4.0;
+            let goku_btn_w = (sw - 20.0) / 6.0;
+            let goku_types = [
+                ("STR極", StatType::Str),
+                ("AGI極", StatType::Agi),
+                ("VIT極", StatType::Vit),
+                ("INT極", StatType::Int),
+                ("DEX極", StatType::Dex),
+                ("LUK極", StatType::Luk),
+            ];
+            for (k, (glabel, gstat)) in goku_types.iter().enumerate() {
+                let gx = sx + k as f32 * (goku_btn_w + 4.0);
+                if self.draw_button(Rect::new(gx, y, goku_btn_w, 20.0), glabel, false, Color::new(0.22, 0.32, 0.42, 1.0)) {
+                    stat_delta = Some((*gstat, 50));
+                }
+            }
+            y += 28.0;
 
             // 主武器の直接持ち替えボタン（短剣 / 長弓 / 槍 / 片手剣）
             self.draw_text_helper("主武器の持ち替え:", sx, y + 12.0, 12.0, Color::new(1.0, 0.8, 0.4, 1.0));
@@ -1309,11 +1586,11 @@ impl GuiApp {
                 ("剣 (射程1)", "sword", 1, 100),
             ];
 
+            let mut new_weapon = None;
             for (i, (w_label, w_type, range, atk)) in weapons.iter().enumerate() {
                 let wx = sx + i as f32 * (w_btn_w + 4.0);
-                if self.draw_button(Rect::new(wx, y, w_btn_w, 24.0), w_label, attack_range == *range, Color::new(0.20, 0.26, 0.35, 1.0)) {
-                    // 武器の換装
-                    let new_eq = Equipment {
+                if self.draw_button(Rect::new(wx, y, w_btn_w, 24.0), w_label, wep_range == *range, Color::new(0.20, 0.26, 0.35, 1.0)) {
+                    new_weapon = Some(Equipment {
                         id: format!("weap_{}", w_type),
                         name: w_label.to_string(),
                         slot: EquipSlot::Weapon,
@@ -1324,29 +1601,10 @@ impl GuiApp {
                         cards: vec![],
                         modifiers: vec![],
                         is_locked: false,
-                    };
-
-                    // 主力キャラクターまたは同行メンバーの装備を更新
-                    if self.world.active_character.id == char_id {
-                        self.world.active_character.equipments.retain(|e| e.slot != EquipSlot::Weapon);
-                        self.world.active_character.equipments.push(new_eq.clone());
-                    } else if let Some(mem) = self.world.party_members.iter_mut().find(|m| m.id == char_id) {
-                        mem.equipments.retain(|e| e.slot != EquipSlot::Weapon);
-                        mem.equipments.push(new_eq.clone());
-                    }
-
-                    // セッション中の戦闘ユニットも即時更新
-                    if let Some(ref mut session) = self.session {
-                        if let Some(combatant) = session.team_a.iter_mut().find(|u| u.character.id == char_id) {
-                            combatant.attack_range = *range;
-                            combatant.character.equipments.retain(|e| e.slot != EquipSlot::Weapon);
-                            combatant.character.equipments.push(new_eq);
-                        }
-                    }
-                    self.chat_logs.push(format!("[装備換装] {} は 『{}』 に持ち替えました！ (射程: {})", char_name, w_label, range));
+                    });
                 }
             }
-            y += 32.0;
+            y += 30.0;
 
             // ガンビット作戦プリセット切替
             self.draw_text_helper("ガンビット戦術プリセット切替:", sx, y + 12.0, 12.0, Color::new(0.5, 0.9, 0.7, 1.0));
@@ -1360,10 +1618,11 @@ impl GuiApp {
                 ("密集AoE爆撃", 3),
             ];
 
+            let mut new_gambit = None;
             for (i, (g_label, mode)) in gambit_presets.iter().enumerate() {
                 let gx = sx + i as f32 * (g_btn_w + 4.0);
                 if self.draw_button(Rect::new(gx, y, g_btn_w, 24.0), g_label, false, Color::new(0.18, 0.28, 0.25, 1.0)) {
-                    let new_rules = match mode {
+                    let rules = match mode {
                         1 => vec![crate::models::GambitRule {
                             id: "swift_killer".to_string(),
                             priority: 1,
@@ -1384,22 +1643,10 @@ impl GuiApp {
                         }],
                         _ => vec![],
                     };
-
-                    if self.world.active_character.id == char_id {
-                        self.world.active_character.gambit_rules = new_rules.clone();
-                    } else if let Some(mem) = self.world.party_members.iter_mut().find(|m| m.id == char_id) {
-                        mem.gambit_rules = new_rules.clone();
-                    }
-
-                    if let Some(ref mut session) = self.session {
-                        if let Some(combatant) = session.team_a.iter_mut().find(|u| u.character.id == char_id) {
-                            combatant.character.gambit_rules = new_rules;
-                        }
-                    }
-                    self.chat_logs.push(format!("[作戦変更] {} のガンビットを 『{}』 に切り替えました！", char_name, g_label));
+                    new_gambit = Some((g_label, rules));
                 }
             }
-            y += 32.0;
+            y += 30.0;
 
             // 陣形ロール変更（前衛 / 中衛 / 後衛）
             self.draw_text_helper("陣形配置ロール:", sx, y + 12.0, 12.0, Color::new(0.6, 0.85, 1.0, 1.0));
@@ -1412,25 +1659,73 @@ impl GuiApp {
                 ("後衛 (Backline)", FormationRole::Backline),
             ];
 
+            let mut new_role = None;
             for (i, (r_label, r_val)) in roles.iter().enumerate() {
                 let rx = sx + i as f32 * (r_btn_w + 4.0);
-                let is_cur = role == *r_val;
+                let is_cur = target_char.formation.role == *r_val;
                 if self.draw_button(Rect::new(rx, y, r_btn_w, 24.0), r_label, is_cur, Color::new(0.20, 0.28, 0.38, 1.0)) {
-                    if self.world.active_character.id == char_id {
-                        self.world.active_character.formation.role = *r_val;
-                    } else if let Some(mem) = self.world.party_members.iter_mut().find(|m| m.id == char_id) {
-                        mem.formation.role = *r_val;
+                    new_role = Some(*r_val);
+                }
+            }
+
+            // --- 変更アクションを WorldState と session.team_a に即時反映 ---
+            let has_change = reset_requested || stat_delta.is_some() || new_weapon.is_some() || new_gambit.is_some() || new_role.is_some();
+            if has_change {
+                let updated_char = {
+                    let ch = match self.selected_member_idx {
+                        0 => &mut self.world.active_character,
+                        1 => self.world.party_members.get_mut(0).expect("member 0 exists"),
+                        2 => self.world.party_members.get_mut(1).expect("member 1 exists"),
+                        _ => unreachable!(),
+                    };
+
+                    if reset_requested {
+                        ch.base_stats.str_stat = 10;
+                        ch.base_stats.agi = 10;
+                        ch.base_stats.vit = 10;
+                        ch.base_stats.int = 10;
+                        ch.base_stats.dex = 10;
+                        ch.base_stats.luk = 10;
+                        self.chat_logs.push(format!("[ステ振り] {} の全ステータスを初期値(10)にリセットしました！", char_name));
                     }
-                    if let Some(ref mut session) = self.session {
-                        if let Some(combatant) = session.team_a.iter_mut().find(|u| u.character.id == char_id) {
-                            combatant.character.formation.role = *r_val;
-                        }
+                    if let Some((st, val)) = stat_delta {
+                        ch.base_stats.add(st, val);
+                        self.chat_logs.push(format!("[ステ振り] {} の {:?} を +{} 強化！ (戦闘値即時再計算)", char_name, st, val));
                     }
-                    self.chat_logs.push(format!("[陣形変更] {} の配置を 『{:?}』 に指定しました！", char_name, r_val));
+                    if let Some(w) = new_weapon {
+                        ch.equipments.retain(|e| e.slot != EquipSlot::Weapon);
+                        let w_name = w.name.clone();
+                        let w_range = w.attack_range;
+                        ch.equipments.push(w);
+                        self.chat_logs.push(format!("[装備換装] {} は 『{}』 に持ち替えました！ (射程: {})", char_name, w_name, w_range));
+                    }
+                    if let Some((g_label, rules)) = new_gambit {
+                        ch.gambit_rules = rules;
+                        self.chat_logs.push(format!("[作戦変更] {} のガンビットを 『{}』 に切り替えました！", char_name, g_label));
+                    }
+                    if let Some(r) = new_role {
+                        ch.formation.role = r;
+                        self.chat_logs.push(format!("[陣形変更] {} の配置を 『{:?}』 に指定しました！", char_name, r));
+                    }
+                    ch.clone()
+                };
+
+                // セッション中の戦闘ユニット（team_a）にも即座にステータス再計算反映！
+                if let Some(ref mut session) = self.session {
+                    if let Some(combatant) = session.team_a.iter_mut().find(|u| u.character.id == char_id) {
+                        let engine = SimulationEngine::new(&self.db);
+                        let new_stats = engine.calculate_combat_stats(&updated_char, 1.0);
+                        combatant.stats = new_stats;
+                        combatant.attack_range = updated_char.equipments.iter()
+                            .find(|e| e.slot == EquipSlot::Weapon)
+                            .map(|e| e.attack_range)
+                            .unwrap_or(1);
+                        combatant.character = updated_char;
+                    }
                 }
             }
         } else {
-            self.draw_text_helper("戦場上のユニットをクリックすると詳細・作戦変更が可能です。", sx, y + 30.0, 12.0, GRAY);
+            self.draw_text_helper("対象スロットにメンバーが存在しません。", sx, y + 30.0, 12.0, GRAY);
         }
     }
 
@@ -1498,21 +1793,71 @@ impl GuiApp {
         }
         y += 32.0;
 
-        // 5. ロック切り替え & 6. カード装着
-        if self.draw_button(Rect::new(sx, y, half_w, 26.0), "[ロック切替 (誤破壊防止)]", false, Color::new(0.22, 0.26, 0.34, 1.0)) {
+        // 5. ロック切替 ＆ 全カード取り外しボタン
+        if self.draw_button(Rect::new(sx, y, half_w, 24.0), "[ロック切替 (誤破壊防止)]", false, Color::new(0.22, 0.26, 0.34, 1.0)) {
             self.toggle_selected_weapon_lock();
         }
-
-        if self.draw_button(Rect::new(sx + half_w + 6.0, y, half_w, 26.0), "[空き枠へカード装着]", false, Color::new(0.28, 0.20, 0.38, 1.0)) {
-            self.attach_card_to_selected_weapon();
+        if self.draw_button(Rect::new(sx + half_w + 6.0, y, half_w, 24.0), "[全カード取り外し (初期化)]", false, Color::new(0.35, 0.20, 0.25, 1.0)) {
+            self.detach_all_cards_from_selected();
         }
-        y += 36.0;
+        y += 28.0;
 
+        // 選択中武器のカード装着状況表示
+        let selected_eq = if self.selected_storage_equip_idx == Some(0) || self.selected_storage_equip_idx.is_none() {
+            self.world.active_character.equipments.iter().find(|e| e.slot == EquipSlot::Weapon)
+        } else if let Some(idx) = self.selected_storage_equip_idx {
+            self.world.storage_equipments.get(idx - 1)
+        } else {
+            None
+        };
+
+        if let Some(eq) = selected_eq {
+            let card_names: Vec<String> = eq.cards.iter().map(|c| c.name.clone()).collect();
+            let c_info = if card_names.is_empty() {
+                "なし (空きスロット: 4/4)".to_string()
+            } else {
+                format!("{} (空き: {}/{})", card_names.join(", "), eq.slots.saturating_sub(eq.cards.len() as u8), eq.slots)
+            };
+            self.draw_text_helper(&format!("装着中: {}", c_info), sx, y + 12.0, 11.5, Color::new(0.95, 0.9, 0.5, 1.0));
+        }
+        y += 18.0;
+
+        // 所持カード一覧＆装着ボタン群
+        self.draw_text_helper("所持カード一覧 (空きスロットへ装着):", sx, y + 12.0, 12.0, Color::new(0.7, 0.9, 1.0, 0.95));
+        y += 18.0;
+
+        let card_catalog_labels = [
+            ("hydra_card", "ヒドラカード (人特化+20%)"),
+            ("flame_eye_card", "炎眼のカード (ASファイアーボルトLv3)"),
+            ("soldier_skel_card", "ソルジャースケルトンC (会心 LUK+25)"),
+            ("drainliar_card", "ドレインリアーC (動物特化+20%)"),
+            ("andre_card", "アンドレカード (剛力 STR+5)"),
+        ];
+
+        let mut attach_card_id = None;
+        for cid in &self.available_cards {
+            let label = card_catalog_labels.iter()
+                .find(|(id, _)| id == cid)
+                .map(|(_, l)| *l)
+                .unwrap_or(cid.as_str());
+
+            self.draw_text_helper(label, sx + 4.0, y + 12.0, 11.0, WHITE);
+            if self.draw_button(Rect::new(sx + sw - 64.0, y, 60.0, 18.0), "+装着", false, Color::new(0.20, 0.28, 0.40, 1.0)) {
+                attach_card_id = Some(cid.to_string());
+            }
+            y += 20.0;
+        }
+
+        if let Some(cid) = attach_card_id {
+            self.attach_specific_card_to_selected(&cid);
+        }
+
+        y += 8.0;
         // 鍛冶屋ボーナスと安全圏の説明
         let smith_bonus = 8.5f32; // DEX/LUKボーナス
-        self.draw_text_helper(&format!("専属鍛冶屋職能ボーナス: +{:.1}% (成功率底上げ中)", smith_bonus), sx, y + 12.0, 11.5, Color::new(0.7, 0.9, 0.8, 0.9));
-        y += 18.0;
-        self.draw_text_helper("※+4までは安全圏(100%)。+5以降は失敗時に『クホホ…』消滅します。", sx, y + 12.0, 11.0, Color::new(0.85, 0.7, 0.7, 0.8));
+        self.draw_text_helper(&format!("専属鍛冶屋職能ボーナス: +{:.1}% (成功率底上げ中)", smith_bonus), sx, y + 12.0, 11.0, Color::new(0.7, 0.9, 0.8, 0.9));
+        y += 16.0;
+        self.draw_text_helper("※+4までは安全圏(100%)。+5以降は失敗時に『クホホ…』消滅します。", sx, y + 12.0, 10.5, Color::new(0.85, 0.7, 0.7, 0.8));
     }
 
     /// タブ3: 市場/派遣（BOM経済＆遠征: 価格・在庫バー・買付・売却・自動遠征）
@@ -1660,43 +2005,95 @@ impl GuiApp {
         draw_line(sx, y, sx + sw, y, 1.0, Color::new(0.3, 0.4, 0.5, 0.5));
         y += 8.0;
 
-        // ライバル3大ギルドの戦力情報
-        self.draw_text_helper("◆ ライバル3大ギルド戦力評価:", sx, y + 14.0, 13.0, Color::new(1.0, 0.8, 0.3, 1.0));
-        y += 22.0;
+        // 1. 狩場の生態系シフト分析 (Solver診断)
+        self.draw_text_helper("◆ 狩場の生態系シフト分析 (Solver診断):", sx, y + 14.0, 13.0, Color::new(1.0, 0.8, 0.3, 1.0));
+        y += 20.0;
 
-        let rivals = [
-            ("黒曜の旅団 (宿敵クロード率いる)", "戦力: Sランク (物理特化/過剰精錬)"),
-            ("黄金の盾 (鉄壁ディフェンス)", "戦力: Aランク (超高VIT金剛壁)"),
-            ("蒼天の魔導会 (広域爆撃)", "戦力: Aランク (詠唱AoE範囲魔法)"),
-        ];
+        let (phys_dmg, ranged_dmg) = if let Some(ref s) = self.session {
+            (s.physical_damage, s.ranged_magic_damage)
+        } else {
+            (0, 0)
+        };
+        self.draw_text_helper(
+            &format!("直近与ダメージ: 近接物理 {} Dmg vs 遠距離/魔法 {} Dmg", phys_dmg, ranged_dmg),
+            sx + 4.0, y + 12.0, 11.5, Color::new(0.85, 0.9, 0.95, 0.9)
+        );
+        y += 18.0;
 
-        for (rname, rstat) in rivals {
-            self.draw_text_helper(&format!("・{} : {}", rname, rstat), sx + 4.0, y + 12.0, 11.5, Color::new(0.85, 0.9, 0.95, 0.9));
-            y += 18.0;
-        }
+        let (status_text, status_color) = if let Some(ref w) = self.ecosystem_shift_warning {
+            (w.as_str(), Color::new(1.0, 0.5, 0.2, 1.0))
+        } else {
+            ("均衡状態: 敵モンスターは通常のバランス構成で出現中", Color::new(0.4, 0.9, 0.6, 0.9))
+        };
+        self.draw_text_helper(status_text, sx + 4.0, y + 12.0, 11.5, status_color);
+        y += 24.0;
 
-        y += 8.0;
         draw_line(sx, y, sx + sw, y, 1.0, Color::new(0.3, 0.4, 0.5, 0.5));
         y += 8.0;
 
-        // FA（フリーエージェント）処遇ボタン
-        self.draw_text_helper("◆ FA宣言キャラの処遇操作:", sx, y + 14.0, 13.0, Color::new(0.9, 0.7, 0.8, 1.0));
-        y += 22.0;
+        // 2. ライバル3大ギルドのロスター偵察 ＆ 指名GvG開戦
+        self.draw_text_helper("◆ ライバルギルド偵察 ＆ 指名GvG闘技場:", sx, y + 14.0, 13.0, Color::new(0.7, 0.9, 1.0, 1.0));
+        y += 20.0;
 
-        let fa_btn_w = (sw - 8.0) / 3.0;
-        if self.draw_button(Rect::new(sx, y, fa_btn_w, 24.0), "[引き留め]", false, Color::new(0.20, 0.35, 0.25, 1.0)) {
-            if self.world.treasury_zeny >= 5000 {
-                self.world.treasury_zeny -= 5000;
-                self.chat_logs.push("[FA引き留め] ボーナス5,000Zを支給し、古参メンバーの残留に成功しました！".to_string());
-            } else {
-                self.chat_logs.push("[資金不足] 引き留めボーナス資金が足りません。".to_string());
+        // ライバルギルド切り替えタブ
+        let r_guild_names = ["黒曜の旅団", "黄金の盾", "灰燼の学派"];
+        let r_tab_w = (sw - 8.0) / 3.0;
+        for (i, rname) in r_guild_names.iter().enumerate() {
+            let rx = sx + i as f32 * (r_tab_w + 4.0);
+            let is_sel = self.selected_rival_guild == i;
+            if self.draw_button(Rect::new(rx, y, r_tab_w, 22.0), rname, is_sel, Color::new(0.22, 0.26, 0.35, 1.0)) {
+                self.selected_rival_guild = i;
             }
         }
-        if self.draw_button(Rect::new(sx + fa_btn_w + 4.0, y, fa_btn_w, 24.0), "[街NPC化]", false, Color::new(0.28, 0.24, 0.35, 1.0)) {
-            self.chat_logs.push("[街NPC化] 引退メンバーが街の専属鍛冶屋に就任！ (精錬成功率+10%補正)".to_string());
+        y += 26.0;
+
+        // 選択されたライバルギルドのロスター偵察情報
+        let sel_rival_name = r_guild_names[self.selected_rival_guild];
+        let rival_opt = self.world.rival_guilds.iter().find(|g| g.name.contains(sel_rival_name));
+
+        if let Some(rival) = rival_opt {
+            self.draw_text_helper(
+                &format!("【{}】 所属メンバー数: {}名", rival.name, rival.roster.len()),
+                sx + 4.0, y + 12.0, 12.0, Color::new(1.0, 0.85, 0.4, 1.0)
+            );
+            y += 18.0;
+
+            for mem in rival.roster.iter().take(3) {
+                let tag = BuildTag::analyze(mem);
+                let wep_label = mem.equipments.iter().find(|e| e.slot == EquipSlot::Weapon)
+                    .map(|w| format!("+{} {}", w.refine, w.name))
+                    .unwrap_or_else(|| "素手".to_string());
+
+                let fa_tag = if mem.name.contains("クロード") || mem.name.contains("バルガス") || mem.generation > 0 {
+                    " [★元自軍]"
+                } else {
+                    ""
+                };
+
+                let mem_line = format!("・第{}世代 {} (Lv.{} {}) [{}] {}{}", mem.generation, mem.name, mem.level, mem.job_id, tag.name_ja(), wep_label, fa_tag);
+                self.draw_text_helper(&mem_line, sx + 8.0, y + 12.0, 11.0, Color::new(0.85, 0.92, 0.98, 0.9));
+                y += 17.0;
+            }
+        } else {
+            self.draw_text_helper("ライバルデータ読み込み待機中...", sx + 4.0, y + 12.0, 11.5, GRAY);
+            y += 20.0;
         }
-        if self.draw_button(Rect::new(sx + (fa_btn_w + 4.0) * 2.0, y, fa_btn_w, 24.0), "[移籍承認]", false, Color::new(0.38, 0.20, 0.20, 1.0)) {
-            self.chat_logs.push("[FA移籍承認] メンバーが宿敵『黒曜の旅団』へFA移籍しました！ 次回GvGで立ちはだかります。".to_string());
+
+        // [★ このライバルを指名して空間GvG開戦！] ボタン
+        y += 6.0;
+        let gvg_btn_label = format!("★ 『{}』を指名して空間GvG開戦 (闘技場)", sel_rival_name);
+        if self.draw_button(Rect::new(sx, y, sw, 26.0), &gvg_btn_label, false, Color::new(0.38, 0.18, 0.32, 1.0)) {
+            let engine = SimulationEngine::new(&self.db);
+            let map = HexMap::create_gvg_arena_map();
+            let party = self.get_player_party();
+            let rival_roster = if let Some(r) = self.world.rival_guilds.iter().find(|g| g.name.contains(sel_rival_name)) {
+                r.roster.clone()
+            } else {
+                party.clone()
+            };
+            self.session = Some(engine.create_gvg_session(map, &party, &rival_roster, "自軍ギルド", sel_rival_name, None));
+            self.chat_logs.push(format!("[空間GvG開戦] 『{}』を指名！ 栄光の闘技場で決戦が開始されました！", sel_rival_name));
+            self.active_tab = DashboardTab::Battlefield;
         }
         y += 32.0;
 
@@ -1839,19 +2236,66 @@ impl GuiApp {
         }
     }
 
-    /// 選択中武器へカード装着
-    fn attach_card_to_selected_weapon(&mut self) {
-        if let Some(eq) = self.world.active_character.equipments.iter_mut().find(|e| e.slot == EquipSlot::Weapon) {
-            if eq.cards.len() < eq.slots as usize {
-                eq.cards.push(Card {
-                    id: "card_skel_worker".to_string(),
-                    name: "スケルワーカーカード".to_string(),
-                    slot: EquipSlot::Weapon,
-                    modifiers: vec![],
-                });
-                self.chat_logs.push(format!("[カード装着] {} の空きスロットへ 『スケルワーカーカード』 を装着しました！ (残スロット: {})", eq.name, eq.slots as usize - eq.cards.len()));
-            } else {
-                self.chat_logs.push("[装着不可] 空きスロットがありません。".to_string());
+    /// 選択中武器へ指定カードを装着
+    fn attach_specific_card_to_selected(&mut self, card_id: &str) {
+        let card_template = if let Some(c) = self.db.cards.get(card_id) {
+            c.clone()
+        } else {
+            return;
+        };
+
+        let is_equipped = self.selected_storage_equip_idx == Some(0) || self.selected_storage_equip_idx.is_none();
+        if is_equipped {
+            if let Some(eq) = self.world.active_character.equipments.iter_mut().find(|e| e.slot == EquipSlot::Weapon) {
+                if eq.cards.len() < eq.slots as usize {
+                    eq.cards.push(card_template.clone());
+                    self.chat_logs.push(format!("[カード装着] 主人公武器 『{}』 に 『{}』 を装着！ (異種乗算・オートスペル有効)", eq.name, card_template.name));
+                } else {
+                    self.chat_logs.push("[装着不可] 空きスロットがありません。".to_string());
+                }
+            }
+            // 戦闘セッションへ即時同期
+            let c_clone = self.world.active_character.clone();
+            if let Some(ref mut session) = self.session {
+                if let Some(combatant) = session.team_a.iter_mut().find(|u| u.character.id == c_clone.id) {
+                    let engine = SimulationEngine::new(&self.db);
+                    combatant.stats = engine.calculate_combat_stats(&c_clone, 1.0);
+                    combatant.character = c_clone;
+                }
+            }
+        } else if let Some(idx) = self.selected_storage_equip_idx {
+            if let Some(eq) = self.world.storage_equipments.get_mut(idx - 1) {
+                if eq.cards.len() < eq.slots as usize {
+                    eq.cards.push(card_template.clone());
+                    self.chat_logs.push(format!("[カード装着] 倉庫武器 『{}』 に 『{}』 を装着！", eq.name, card_template.name));
+                } else {
+                    self.chat_logs.push("[装着不可] 空きスロットがありません。".to_string());
+                }
+            }
+        }
+    }
+
+    /// 選択中武器から全カードを取り外し（スロット初期化）
+    fn detach_all_cards_from_selected(&mut self) {
+        let is_equipped = self.selected_storage_equip_idx == Some(0) || self.selected_storage_equip_idx.is_none();
+        if is_equipped {
+            if let Some(eq) = self.world.active_character.equipments.iter_mut().find(|e| e.slot == EquipSlot::Weapon) {
+                eq.cards.clear();
+                self.chat_logs.push(format!("[カード脱着] 主人公武器 『{}』 のカードをすべて取り外しました！", eq.name));
+            }
+            // 戦闘セッションへ即時同期
+            let c_clone = self.world.active_character.clone();
+            if let Some(ref mut session) = self.session {
+                if let Some(combatant) = session.team_a.iter_mut().find(|u| u.character.id == c_clone.id) {
+                    let engine = SimulationEngine::new(&self.db);
+                    combatant.stats = engine.calculate_combat_stats(&c_clone, 1.0);
+                    combatant.character = c_clone;
+                }
+            }
+        } else if let Some(idx) = self.selected_storage_equip_idx {
+            if let Some(eq) = self.world.storage_equipments.get_mut(idx - 1) {
+                eq.cards.clear();
+                self.chat_logs.push(format!("[カード脱着] 倉庫武器 『{}』 のカードをすべて取り外しました！", eq.name));
             }
         }
     }
