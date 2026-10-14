@@ -14,6 +14,7 @@ pub enum DispatchDestination {
 }
 
 impl DispatchDestination {
+    #[allow(dead_code)]
     pub fn name_ja(&self) -> &'static str {
         match self {
             Self::AbandonedMine => "廃坑の深層（鉱山資源採掘）",

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use rand::Rng;
 
-use crate::models::{Character, Equipment, EquipSlot, Stats, StatType};
+use crate::models::{Character, Equipment, EquipSlot, FormationRole, Stats, StatType, TacticalFormation};
 use crate::loader::ModDatabase;
 use crate::progression::{GrowthPlan, Progression};
 use crate::guild::{GuildRoster, RivalGuild};
@@ -57,14 +57,19 @@ impl WorldState {
             name: "マインゴーシュ".to_string(),
             slot: EquipSlot::Weapon,
             weapon_atk: 50,
+            attack_range: 1,
             refine: 0,
             slots: 4,
             cards: vec![],
             modifiers: vec![],
             is_locked: false,
         });
+        active_char.formation = TacticalFormation {
+            role: FormationRole::Midline,
+            priority_target_role: None,
+        };
 
-        // 初期同行メンバー：バルガス（ナイト・壁役）
+        // 初期同行メンバー：バルガス（ナイト・壁役・前衛）
         let vargas = Character {
             id: "char_vargas".to_string(),
             name: "バルガス".to_string(),
@@ -76,6 +81,7 @@ impl WorldState {
                 name: "ツルギ".to_string(),
                 slot: EquipSlot::Weapon,
                 weapon_atk: 100,
+                attack_range: 1,
                 refine: 4,
                 slots: 2,
                 cards: vec![],
@@ -87,9 +93,13 @@ impl WorldState {
             generation: 1,
             exp: 0,
             activity_score: 100,
+            formation: TacticalFormation {
+                role: FormationRole::Frontline,
+                priority_target_role: None,
+            },
         };
 
-        // 初期同行メンバー：オットー（ブラックスミス・支援役）
+        // 初期同行メンバー：オットー（ブラックスミス・支援役・後衛）
         let otto = Character {
             id: "char_otto".to_string(),
             name: "オットー".to_string(),
@@ -102,6 +112,10 @@ impl WorldState {
             generation: 1,
             exp: 0,
             activity_score: 100,
+            formation: TacticalFormation {
+                role: FormationRole::Backline,
+                priority_target_role: None,
+            },
         };
 
         // ギルド名簿の初期化（最大定員10名）
@@ -121,6 +135,7 @@ impl WorldState {
             generation: 1,
             exp: 0,
             activity_score: 80,
+            formation: TacticalFormation::default(),
         };
         let reserve2 = Character {
             id: "char_reserve_priest".to_string(),
@@ -134,6 +149,7 @@ impl WorldState {
             generation: 1,
             exp: 0,
             activity_score: 80,
+            formation: TacticalFormation::default(),
         };
         let reserve3 = Character {
             id: "char_reserve_thief".to_string(),
@@ -147,6 +163,7 @@ impl WorldState {
             generation: 1,
             exp: 0,
             activity_score: 80,
+            formation: TacticalFormation::default(),
         };
         roster.add_member(reserve1);
         roster.add_member(reserve2);
@@ -170,6 +187,7 @@ impl WorldState {
                 name: "ダマスカス".to_string(),
                 slot: EquipSlot::Weapon,
                 weapon_atk: 118,
+                attack_range: 1,
                 refine: 0,
                 slots: 2,
                 cards: vec![],
@@ -181,6 +199,7 @@ impl WorldState {
                 name: "ダマスカス".to_string(),
                 slot: EquipSlot::Weapon,
                 weapon_atk: 118,
+                attack_range: 1,
                 refine: 0,
                 slots: 2,
                 cards: vec![],
@@ -192,6 +211,7 @@ impl WorldState {
                 name: "ダマスカス".to_string(),
                 slot: EquipSlot::Weapon,
                 weapon_atk: 118,
+                attack_range: 1,
                 refine: 0,
                 slots: 2,
                 cards: vec![],
@@ -203,6 +223,7 @@ impl WorldState {
                 name: "チェーンメイル".to_string(),
                 slot: EquipSlot::Armor,
                 weapon_atk: 0,
+                attack_range: 1,
                 refine: 0,
                 slots: 1,
                 cards: vec![],
@@ -227,6 +248,7 @@ impl WorldState {
                 name: "+8クリシュナ".to_string(),
                 slot: EquipSlot::Weapon,
                 weapon_atk: 140,
+                attack_range: 1,
                 refine: 8,
                 slots: 2,
                 cards: vec![],
@@ -238,6 +260,10 @@ impl WorldState {
             generation: 1,
             exp: 0,
             activity_score: 100,
+            formation: TacticalFormation {
+                role: FormationRole::Midline,
+                priority_target_role: None,
+            },
         });
         obsidian.roster.push(Character {
             id: "rival_obsidian_2".to_string(),
@@ -251,6 +277,10 @@ impl WorldState {
             generation: 1,
             exp: 0,
             activity_score: 100,
+            formation: TacticalFormation {
+                role: FormationRole::Frontline,
+                priority_target_role: None,
+            },
         });
         obsidian.roster.push(Character {
             id: "rival_obsidian_3".to_string(),
@@ -264,6 +294,10 @@ impl WorldState {
             generation: 1,
             exp: 0,
             activity_score: 100,
+            formation: TacticalFormation {
+                role: FormationRole::Frontline,
+                priority_target_role: None,
+            },
         });
         rival_guilds.push(obsidian);
 
@@ -280,6 +314,7 @@ impl WorldState {
                 name: "+9反射のバックラー".to_string(),
                 slot: EquipSlot::Shield,
                 weapon_atk: 10,
+                attack_range: 1,
                 refine: 9,
                 slots: 1,
                 cards: vec![],
@@ -291,6 +326,10 @@ impl WorldState {
             generation: 1,
             exp: 0,
             activity_score: 100,
+            formation: TacticalFormation {
+                role: FormationRole::Frontline,
+                priority_target_role: None,
+            },
         });
         iron_coffin.roster.push(Character {
             id: "rival_iron_2".to_string(),
@@ -304,6 +343,10 @@ impl WorldState {
             generation: 1,
             exp: 0,
             activity_score: 100,
+            formation: TacticalFormation {
+                role: FormationRole::Frontline,
+                priority_target_role: None,
+            },
         });
         iron_coffin.roster.push(Character {
             id: "rival_iron_3".to_string(),
@@ -317,6 +360,10 @@ impl WorldState {
             generation: 1,
             exp: 0,
             activity_score: 100,
+            formation: TacticalFormation {
+                role: FormationRole::Backline,
+                priority_target_role: None,
+            },
         });
         rival_guilds.push(iron_coffin);
 
@@ -333,6 +380,7 @@ impl WorldState {
                 name: "+8知力の大杖".to_string(),
                 slot: EquipSlot::Weapon,
                 weapon_atk: 90,
+                attack_range: 4,
                 refine: 8,
                 slots: 2,
                 cards: vec![],
@@ -344,6 +392,10 @@ impl WorldState {
             generation: 1,
             exp: 0,
             activity_score: 100,
+            formation: TacticalFormation {
+                role: FormationRole::Backline,
+                priority_target_role: None,
+            },
         });
         ash_scholars.roster.push(Character {
             id: "rival_ash_2".to_string(),
@@ -357,6 +409,10 @@ impl WorldState {
             generation: 1,
             exp: 0,
             activity_score: 100,
+            formation: TacticalFormation {
+                role: FormationRole::Midline,
+                priority_target_role: None,
+            },
         });
         ash_scholars.roster.push(Character {
             id: "rival_ash_3".to_string(),
@@ -370,6 +426,10 @@ impl WorldState {
             generation: 1,
             exp: 0,
             activity_score: 100,
+            formation: TacticalFormation {
+                role: FormationRole::Backline,
+                priority_target_role: None,
+            },
         });
         rival_guilds.push(ash_scholars);
 

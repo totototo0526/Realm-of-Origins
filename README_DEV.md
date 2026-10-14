@@ -70,6 +70,17 @@
   - 全ゲーム状態を集約する `WorldState`（世代数、ワールド暦、資産、共有倉庫、現役キャラ、同行PT、名簿、市場、派遣、ライバルギルド）
   - RONフォーマットによる `saves/save_data.ron` へのシリアライズ保存とデシリアライズ復元
   - ワールドTick同期進行処理（冒険1回ごとに裏の派遣消化、市場自然回復・BOM補充、ライバル同士の裏リーグ戦と戦力成長が連動）
-- **インタラクティブCUIゲームループ ＆ ヘッドレス自動検証モード (`src/main.rs`)**:
-  - `cargo run`: プレイヤーがコマンド番号（冒険、編成、精錬所、市場、派遣、レガシー転生・FA、GvG、セーブ/ロード）を選択して遊べるCUI司令部
-  - `cargo run -- --headless-demo`: 全システム（初期化〜冒険〜派遣〜市場〜精錬〜転生〜GvG〜セーブ/ロード完全一致検証）を一括実行する回帰テストモード
+- **ヘクスグリッド空間戦場とA*経路探索 (`src/hex_grid.rs`)**:
+  - `HexCoord`: Axial座標系 (`q, r`)、Cube座標相互変換、6方向隣接、ヘクス距離（Manhattan/Cube距離）計算
+  - クォータービュー（アイソメトリック）2.5Dスクリーン座標相互変換 (`hex_to_pixel`, `pixel_to_hex`): 縦Y圧縮0.58倍
+  - `BuildingFootprint`: 矩形障害物・建物フットプリント（`origin`, `width`, `height`）による複数ヘクス通行不可（Blocked）マスク
+  - チョークポイント（狭路）形成: 北側城壁と南側兵舎の間に「幅1ヘクスの狭路」を構築
+  - `HexPathfinder`: 障害物・他ユニットを迂回し、射程内（$\le \text{attack\_range}$）に入る最短経路を計算するA*経路探索
+  - `render_ascii_map`: CUI上でのアスキーアート/絵文字ヘクス戦場マップ描画、ユニットHP状況、AoE着弾点ハイライト表示
+- **射程・空間スキル・陣形タクティクス (`src/models.rs`, `src/engine.rs`, `mods/core/*.ron`)**:
+  - 射程（`attack_range`）と移動間隔（`move_ticks`）: 射程外ならA*で接近し、射程内に入った瞬間からASPD攻撃へ移行する `/noctrl` 空間再現
+  - 範囲攻撃（AoE: `AreaOfEffect { radius }`）: 指定ヘクス中心の周囲巻き込みダメージ（【ファイアーボール】等）
+  - ノックバック（`Knockback { distance }`）: 対象を後方へ弾き飛ばし、壁衝突判定と距離再接近を誘発（【アローレペル】、【マグナムブレイク】）
+  - 空間ガンビット条件: `TargetDistanceAtLeast`, `TargetDistanceAtMost`, `EnemiesInRadius { radius, min_count }`
+  - 陣形ロール (`FormationRole`: `Frontline`, `Midline`, `Backline`): 壁ナイトが狭路を塞ぎ、後方から長弓やLv1養殖キャラが安全に攻撃・経験値獲得を行う陣形構築
+  - 空間GvG対抗戦（`simulate_spatial_gvg`）: 巨大石柱アリーナにおける陣形激突、A*移動、AoE・ノックバック応酬のシミュレーション

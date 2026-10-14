@@ -138,6 +138,7 @@ impl Progression {
             generation,
             exp: 0,
             activity_score: 100,
+            formation: crate::models::TacticalFormation::default(),
         }
     }
 }

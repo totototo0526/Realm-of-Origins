@@ -81,4 +81,37 @@
             ),
         ],
     ),
+    (
+        id: "orc_archer",
+        name: "オークアーチャー",
+        level: 32,
+        race: Demihuman,
+        element: Neutral,
+        size: Medium,
+        base_stats: (
+            str: 28,
+            agi: 42,
+            vit: 25,
+            int: 12,
+            dex: 60,
+            luk: 20,
+        ),
+        base_hp: 4800,
+        base_exp: 780,
+        attack_range: 4,
+        drops: [
+            (
+                id: "orc_claw",
+                name: "オークの爪",
+                base_value: 140,
+                drop_rate: 0.85,
+            ),
+            (
+                id: "steel",
+                name: "鋼鉄",
+                base_value: 1800,
+                drop_rate: 0.35,
+            ),
+        ],
+    ),
 ]

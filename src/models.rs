@@ -153,6 +153,14 @@ pub enum Effect {
         base_bonus: f32,
         scaling_stat: StatType,
     },
+    /// 空間タクティクス：範囲攻撃（指定ヘクス中心の周囲 radius ヘクスの敵全員を巻き込む）
+    AreaOfEffect {
+        radius: u32,
+    },
+    /// 空間タクティクス：ノックバック（対象を後方へ distance ヘクス弾き飛ばす）
+    Knockback {
+        distance: u32,
+    },
 }
 
 /// データ駆動のルール改変用修飾子（Modifier）
@@ -177,6 +185,10 @@ fn default_slots() -> u8 {
     4
 }
 
+pub fn default_attack_range() -> u32 {
+    1
+}
+
 /// 装備品
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Equipment {
@@ -184,6 +196,8 @@ pub struct Equipment {
     pub name: String,
     pub slot: EquipSlot,
     pub weapon_atk: u32,
+    #[serde(default = "default_attack_range")]
+    pub attack_range: u32,
     #[serde(default)]
     pub refine: u8, // refine_level (0〜15)
     #[serde(default = "default_slots")]
@@ -204,6 +218,7 @@ impl Equipment {
             name: name.to_string(),
             slot,
             weapon_atk,
+            attack_range: 1,
             refine,
             slots: 4,
             cards: vec![],
@@ -220,6 +235,15 @@ pub struct Skill {
     pub name: String,
     pub level: u8,
     pub sp_cost: u32,
+    /// スキルの射程（1: 近接, 4〜6: 遠距離魔法・弓など）
+    #[serde(default = "default_attack_range")]
+    pub attack_range: u32,
+    /// 範囲攻撃の半径（NoneまたはSome(1)で周囲1ヘクス巻き込み）
+    #[serde(default)]
+    pub aoe_radius: Option<u32>,
+    /// ノックバック距離（NoneまたはSome(2)で後方2ヘクス突き飛ばし）
+    #[serde(default)]
+    pub knockback_distance: Option<u32>,
     /// オートスペル用等の魔法倍率（例: 1.0 = 100% MATK）
     #[serde(default)]
     pub magic_multiplier: Option<f32>,
@@ -250,6 +274,15 @@ pub enum Condition {
     SelfHpBelow(f32),
     /// ターゲットのVITが閾値以上（例: VIT 50以上）
     TargetVitAbove(u32),
+    /// 空間タクティクス：ターゲットとのヘクス距離が閾値以上（例: 3ヘクス以上離れている）
+    TargetDistanceAtLeast(u32),
+    /// 空間タクティクス：ターゲットとのヘクス距離が閾値以下（例: 2ヘクス以内に接近された）
+    TargetDistanceAtMost(u32),
+    /// 空間タクティクス：指定半径 radius 内に敵対ユニットが min_count 体以上密集している
+    EnemiesInRadius {
+        radius: u32,
+        min_count: usize,
+    },
     /// 無条件（常に真）
     Always,
 }
@@ -272,6 +305,37 @@ pub struct GambitRule {
     pub priority: u32, // 数値が小さいほど高優先度
     pub condition: Condition,
     pub action: Action,
+}
+
+/// 戦闘における陣形役割
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FormationRole {
+    Frontline, // 前衛（壁ナイト等: 最前線で敵を食い止める）
+    Midline,   // 中衛（近接アタッカー、支援等: 前衛のすぐ後ろ）
+    Backline,  // 後衛（弓、魔法、育成中のLv1新キャラ: 安全な後方から攻撃）
+}
+
+impl Default for FormationRole {
+    fn default() -> Self {
+        FormationRole::Frontline
+    }
+}
+
+/// キャラクターの戦術陣形設定
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct TacticalFormation {
+    pub role: FormationRole,
+    #[serde(default)]
+    pub priority_target_role: Option<FormationRole>,
+}
+
+impl TacticalFormation {
+    pub fn new(role: FormationRole) -> Self {
+        Self {
+            role,
+            priority_target_role: None,
+        }
+    }
 }
 
 /// 職業定義
@@ -307,6 +371,8 @@ pub struct Character {
     pub exp: u64,
     #[serde(default)]
     pub activity_score: u32,
+    #[serde(default)]
+    pub formation: TacticalFormation,
 }
 
 impl Character {
@@ -331,6 +397,7 @@ impl Character {
             generation,
             exp: 0,
             activity_score: 100,
+            formation: TacticalFormation::default(),
         }
     }
 }
@@ -385,6 +452,8 @@ pub struct MonsterTemplate {
     pub base_stats: Stats,
     pub base_hp: u32,
     pub base_exp: u32,
+    #[serde(default = "default_attack_range")]
+    pub attack_range: u32,
     pub drops: Vec<DropItem>,
 }
 
@@ -401,6 +470,7 @@ pub struct SpawnedMonster {
     pub stats: Stats,
     pub current_hp: i32,
     pub max_hp: u32,
+    pub attack_range: u32,
     pub drops: Vec<DropItem>,
 }
 
@@ -419,9 +489,28 @@ pub struct ItemDef {
     #[serde(default)]
     pub base_atk: Option<u32>,
     #[serde(default)]
+    pub attack_range: Option<u32>,
+    #[serde(default)]
     pub base_def: Option<u32>,
     #[serde(default)]
     pub slots: Option<u8>,
+}
+
+impl ItemDef {
+    pub fn to_equipment(&self) -> Equipment {
+        Equipment {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            slot: self.equip_slot.unwrap_or(EquipSlot::Weapon),
+            weapon_atk: self.base_atk.unwrap_or(10),
+            attack_range: self.attack_range.unwrap_or(1),
+            refine: 0,
+            slots: self.slots.unwrap_or(4),
+            cards: vec![],
+            modifiers: vec![],
+            is_locked: false,
+        }
+    }
 }
 
 /// BOM（製造レシピ）の原材料要件

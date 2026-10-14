@@ -1,6 +1,7 @@
 mod dispatch;
 mod engine;
 mod guild;
+mod hex_grid;
 mod loader;
 mod market;
 mod models;
@@ -13,8 +14,8 @@ use engine::SimulationEngine;
 use guild::FaDecision;
 use loader::ModDatabase;
 use models::{
-    Action, Card, Condition, EquipSlot, GambitRule,
-    Modifier, StatType, Trigger, Effect
+    Action, Card, Condition, EquipSlot, FormationRole, GambitRule,
+    Modifier, MonsterArchetype, StatType, TacticalFormation, Trigger, Effect
 };
 use progression::{GrowthPlan, Progression};
 use refinery::{Refinery, WorkOrder, WorkOrderMode};
@@ -35,12 +36,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 // =============================================================================
 //  【自動検証モード】--headless-demo
-//  全システムの統合動作と1プレイヤーターンごとのワールド状態遷移、セーブ/ロード往復を自動検証
+//  全システムの統合動作と1プレイヤーターンごとのワールド状態遷移、セーブ/ロード往復、
+//  およびヘクス空間戦場・A*経路探索・建物フットプリント・チョークポイント防衛・空間GvGを自動検証
 // =============================================================================
 fn run_headless_demo(db: &ModDatabase) -> Result<(), Box<dyn std::error::Error>> {
     println!("================================================================================");
-    println!("  Realm of Origins - フェーズ5：完全統合ワールドステート ＆ 自動回帰テスト");
-    println!("  【データ駆動化・セーブ/ロード往復検証・BOM市場・自動派遣・レガシー転生・GvG】");
+    println!("  Realm of Origins - フェーズ6：ヘクス空間戦場 ＆ タクティクス自動回帰テスト");
+    println!("  【Axialヘクス・A*経路探索・建物フットプリント・チョークポイント防衛・空間GvG】");
     println!("================================================================================\n");
 
     let engine = SimulationEngine::new(db);
@@ -49,7 +51,7 @@ fn run_headless_demo(db: &ModDatabase) -> Result<(), Box<dyn std::error::Error>>
     // -------------------------------------------------------------------------
     // Step 1: ワールドステート初期化の確認
     // -------------------------------------------------------------------------
-    println!("📦 [Step 1/8] ワールドステートの初期化とデータ駆動ロードの検証");
+    println!("📦 [Step 1/10] ワールドステートの初期化とデータ駆動ロードの検証");
     println!("   - 現在世代: 第{}世代", world.generation);
     println!("   - ギルド資金: {} Zeny", world.treasury_zeny);
     println!("   - 現役キャラクター: {} (Lv.{} {})", world.active_character.name, world.active_character.level, world.active_character.job_id);
@@ -66,7 +68,7 @@ fn run_headless_demo(db: &ModDatabase) -> Result<(), Box<dyn std::error::Error>>
     // -------------------------------------------------------------------------
     // Step 2: 冒険・パワーレベリング（オーク洞窟3連戦）＆ ワールドTick同期進行
     // -------------------------------------------------------------------------
-    println!("⚔️ [Step 2/8] 冒険・養殖（パワーレベリング）とワールドTick連動進行");
+    println!("⚔️ [Step 2/10] 冒険・養殖（パワーレベリング）とワールドTick連動進行");
     let orc_cave = db.areas.get("orc_dungeon").expect("orc_dungeon area not found");
     println!("   - 探索エリア: 『{}』 (推奨Lv.{})", orc_cave.name, orc_cave.recommended_level);
 
@@ -100,7 +102,7 @@ fn run_headless_demo(db: &ModDatabase) -> Result<(), Box<dyn std::error::Error>>
     // -------------------------------------------------------------------------
     // Step 3: 控え部隊の自動派遣（廃鉱山）＆ ターン進行回収
     // -------------------------------------------------------------------------
-    println!("⛏️ [Step 3/8] 控え部隊の自動派遣（オートファーミング）と同期帰還");
+    println!("⛏️ [Step 3/10] 控え部隊の自動派遣（オートファーミング）と同期帰還");
     let mine_area = db.areas.get("abandoned_mine").expect("abandoned_mine not found");
     let dispatch_members = vec![
         world.roster.active_members.remove(0),
@@ -133,7 +135,7 @@ fn run_headless_demo(db: &ModDatabase) -> Result<(), Box<dyn std::error::Error>>
     // -------------------------------------------------------------------------
     // Step 4: BOM連動市場ハック（買い占めと価格高騰・Overcharge売却）
     // -------------------------------------------------------------------------
-    println!("📈 [Step 4/8] BOM連動型動的市場の買い占め＆高値Overcharge売却");
+    println!("📈 [Step 4/10] BOM連動型動的市場の買い占め＆高値Overcharge売却");
     let damascus_pre = world.market.items.get("damascus").unwrap().buy_price();
     let iron_pre = world.market.items.get("iron_ore").unwrap().buy_price();
     let damascus_stock = world.market.items.get("damascus").unwrap().current_stock;
@@ -169,7 +171,7 @@ fn run_headless_demo(db: &ModDatabase) -> Result<(), Box<dyn std::error::Error>>
     // -------------------------------------------------------------------------
     // Step 5: 全自動クホホ工場（過剰精錬＆カード装着）
     // -------------------------------------------------------------------------
-    println!("🔨 [Step 5/8] 全自動クホホ工場（過剰精錬＆希少品ロック＆カード装着）");
+    println!("🔨 [Step 5/10] 全自動クホホ工場（過剰精錬＆希少品ロック＆カード装着）");
     let blacksmith_otto = world.party_members.iter().find(|c| c.job_id == "blacksmith").unwrap().clone();
     let target_weapon = world.storage_equipments.remove(0); // ダマスカス未精錬
 
@@ -215,7 +217,7 @@ fn run_headless_demo(db: &ModDatabase) -> Result<(), Box<dyn std::error::Error>>
     // -------------------------------------------------------------------------
     // Step 6: レガシー転生 ＆ 古参メンバーのFA移籍承認
     // -------------------------------------------------------------------------
-    println!("🔄 [Step 6/8] レガシー転生（世代交代）と古参メンバーのFA移籍承認");
+    println!("🔄 [Step 6/10] レガシー転生（世代交代）と古参メンバーのFA移籍承認");
     println!("   - 第1世代クロード (Lv.{}) が殿堂入り！", world.active_character.level);
 
     // 第2世代キャラクター「影狼」の誕生（転生ボーナス付与）
@@ -260,7 +262,7 @@ fn run_headless_demo(db: &ModDatabase) -> Result<(), Box<dyn std::error::Error>>
     // -------------------------------------------------------------------------
     // Step 7: 宿敵『黒曜の旅団』とのGvG雪辱戦
     // -------------------------------------------------------------------------
-    println!("🏆 [Step 7/8] 宿敵『黒曜の旅団』とのギルドリーグ対抗戦（GvG）");
+    println!("🏆 [Step 7/10] 宿敵『黒曜の旅団』とのギルドリーグ対抗戦（GvG）");
     let obsidian = world.rival_guilds.iter().find(|g| g.name == "黒曜の旅団").unwrap();
     let rival_team = obsidian.roster.iter().take(3).cloned().collect::<Vec<_>>();
 
@@ -301,9 +303,192 @@ fn run_headless_demo(db: &ModDatabase) -> Result<(), Box<dyn std::error::Error>>
     println!("   ✅ ギルドリーグGvG対戦完了\n");
 
     // -------------------------------------------------------------------------
-    // Step 8: セーブ ＆ ロード往復検証（ファイル保存 ➔ 復元 ➔ 整合性アサーション）
+    // Step 8: ヘクス空間タクティクス検証①【チョークポイント隘路防衛 ＆ 遠距離ハラスメント】
     // -------------------------------------------------------------------------
-    println!("💾 [Step 8/8] セーブ ＆ ロード往復完全一致検証");
+    println!("🏰 [Step 8/10] ヘクス空間タクティクス検証①【チョークポイント隘路防衛 ＆ 遠距離ハラスメント】");
+    let chokepoint_map = hex_grid::HexMap::create_chokepoint_map();
+    println!("   🗺️ 戦場マップ: 『{}』 (幅1ヘクスの隘路、北側城壁・南側兵舎フットプリント)", chokepoint_map.name);
+
+    // 防衛部隊（前衛: VIT壁ナイト、中衛/後衛: 長弓スナイパー、後衛養殖: Lv1初心者）
+    let mut defender_party = Vec::new();
+
+    // 1. 前衛: 壁ナイト（バルガス、VIT極・重装甲・隘路の栓）
+    let mut wall_knight = Progression::create_reincarnated_character(
+        "wall_knight_vargas",
+        "護衛騎士バルガス",
+        "swordman",
+        2,
+        GrowthPlan::VitTank,
+    );
+    wall_knight.level = 42;
+    wall_knight.base_stats.add(StatType::Vit, 65);
+    wall_knight.base_stats.add(StatType::Str, 35);
+    wall_knight.formation = TacticalFormation::new(FormationRole::Frontline);
+    if let Some(lance_item) = db.items.get("lance") {
+        wall_knight.equipments.push(lance_item.to_equipment());
+    }
+    if let Some(mb) = db.skills.get("magnum_break") {
+        wall_knight.learned_skills.push(mb.clone());
+    }
+    defender_party.push(wall_knight);
+
+    // 2. 後衛: 長弓スナイパー（影狼、射程5、ファイアーボールAoE ＆ アローレペルノックバック）
+    let mut sniper = world.active_character.clone();
+    sniper.formation = TacticalFormation::new(FormationRole::Backline);
+    sniper.equipments.retain(|e| e.slot != EquipSlot::Weapon);
+    if let Some(bow_item) = db.items.get("hunter_bow") {
+        sniper.equipments.push(bow_item.to_equipment());
+    }
+    if let Some(fb) = db.skills.get("fire_ball") {
+        sniper.learned_skills.push(fb.clone());
+    }
+    if let Some(ar) = db.skills.get("arrow_repel") {
+        sniper.learned_skills.push(ar.clone());
+    }
+    // ガンビット戦術設定
+    sniper.gambit_rules.clear();
+    sniper.gambit_rules.push(GambitRule {
+        id: "knockback_close".to_string(),
+        priority: 1,
+        condition: Condition::TargetDistanceAtMost(2),
+        action: Action::UseActiveSkill("arrow_repel".to_string()),
+    });
+    sniper.gambit_rules.push(GambitRule {
+        id: "aoe_crowd".to_string(),
+        priority: 2,
+        condition: Condition::EnemiesInRadius { radius: 1, min_count: 2 },
+        action: Action::UseActiveSkill("fire_ball".to_string()),
+    });
+    defender_party.push(sniper);
+
+    // 3. 後方養殖枠: Lv1初心者「ヒナタ」（最奥で安全に経験値を吸う）
+    let mut rookie = Progression::create_reincarnated_character(
+        "char_rookie_hinata",
+        "養殖ヒナタ",
+        "novice",
+        3,
+        GrowthPlan::VitTank,
+    );
+    rookie.formation = TacticalFormation::new(FormationRole::Backline);
+    defender_party.push(rookie);
+
+    // 侵攻モンスター群（重装型オーク ＋ 迅速型オーク ＋ オークアーチャー）
+    let mut invading_monsters = Vec::new();
+    if let Some(orc_tpl) = db.monsters.get("orc_warrior") {
+        invading_monsters.push(engine.spawn_monster(orc_tpl, MonsterArchetype::Heavy));
+        invading_monsters.push(engine.spawn_monster(orc_tpl, MonsterArchetype::Swift));
+    }
+    if let Some(archer_tpl) = db.monsters.get("orc_archer") {
+        invading_monsters.push(engine.spawn_monster(archer_tpl, MonsterArchetype::Standard));
+    }
+
+    println!("   🛡️ 防衛陣営: 前衛[壁ナイト(VIT極)] ＋ 後衛[長弓スナイパー(射程5)] ＋ 最奥[Lv1養殖ヒナタ]");
+    println!("   👹 侵攻モンスター群: 重装型オーク(Heavy) ＋ 迅速型オーク(Swift) ＋ オークアーチャー(Archer: 射程4)");
+
+    let spatial_res = engine.simulate_spatial_battle(&chokepoint_map, &defender_party, &mut invading_monsters);
+
+    println!("   📊 空間戦闘結果:");
+    println!("      - 状況: {}", if spatial_res.is_victory { "🎉 防衛成功 (侵攻部隊殲滅)" } else { "☠️ 防衛突破 (敗北)" });
+    println!("      - 所要Tick: {} Ticks, 総ダメージ: {}", spatial_res.total_ticks, spatial_res.total_damage);
+    println!("      - 獲得経験値: {} Exp, ドロップ品価値: {} Zeny", spatial_res.gained_exp, spatial_res.final_loot_value);
+
+    // アスキーアート盤面スナップショットの表示
+    println!("\n   🗺️ --- 【ヘクス戦場アスキーアート盤面スナップショット】 ---");
+    for snap in &spatial_res.ascii_snapshots {
+        println!("{}", snap);
+    }
+
+    // 戦闘ハイライトログの表示
+    println!("   📜 戦闘ハイライトログ:");
+    if spatial_res.logs.len() <= 8 {
+        for log in &spatial_res.logs {
+            println!("{}", log);
+        }
+    } else {
+        for log in spatial_res.logs.iter().take(4) {
+            println!("{}", log);
+        }
+        println!("      ... (中略 {} 行) ...", spatial_res.logs.len() - 8);
+        for log in spatial_res.logs.iter().skip(spatial_res.logs.len() - 4) {
+            println!("{}", log);
+        }
+    }
+    println!("   ✅ チョークポイント隘路防衛＆遠距離ハラスメント検証完了\n");
+
+    // -------------------------------------------------------------------------
+    // Step 9: ヘクス空間タクティクス検証②【空間GvG陣形激突（自軍 vs 灰燼の学派）】
+    // -------------------------------------------------------------------------
+    println!("⚔️ [Step 9/10] ヘクス空間タクティクス検証②【空間GvG陣形激突（自軍 vs 灰燼の学派）】");
+    let arena_map = hex_grid::HexMap::create_gvg_arena_map();
+    println!("   🗺️ GvGアリーナ: 『{}』 (石柱フットプリント障害物、西軍 vs 東軍)", arena_map.name);
+
+    let ashes = world.rival_guilds.iter().find(|g| g.name == "灰燼の学派").unwrap_or(&world.rival_guilds[0]);
+    let ashes_team = ashes.roster.clone();
+
+    // 自軍（前衛: 壁ナイト、中衛: アサシン、後衛: 長弓ハンター）
+    let mut gvg_team_a = Vec::new();
+    let mut gvg_front = defender_party[0].clone();
+    gvg_front.formation = TacticalFormation::new(FormationRole::Frontline);
+    gvg_team_a.push(gvg_front);
+
+    let mut gvg_mid = Progression::create_reincarnated_character(
+        "skirmisher_shinobi",
+        "影縫いのシノビ",
+        "thief",
+        2,
+        GrowthPlan::AgiCrit,
+    );
+    gvg_mid.level = 42;
+    gvg_mid.formation = TacticalFormation::new(FormationRole::Midline);
+    gvg_team_a.push(gvg_mid);
+
+    let mut gvg_back = defender_party[1].clone();
+    gvg_back.formation = TacticalFormation::new(FormationRole::Backline);
+    gvg_team_a.push(gvg_back);
+
+    println!("   🚩 自軍出撃陣形: 前衛[壁ナイト] / 中衛[シノビ] / 後衛[スナイパー] (計3名)");
+    println!("   🔥 対戦相手: 『{}』 (計{}名)", ashes.name, ashes_team.len());
+
+    let spatial_gvg_res = engine.simulate_spatial_gvg(
+        &arena_map,
+        &gvg_team_a,
+        &ashes_team,
+        "我らがギルド",
+        &ashes.name,
+        Some(world.roster.town_bonus.clone()),
+    );
+
+    println!("   🏁 空間GvG決着: 勝者『{}』 (戦闘所要: {} Tick)",
+        spatial_gvg_res.winner_team, spatial_gvg_res.total_ticks);
+    println!("      - 自軍生存者: {:?}, 敵軍生存者: {:?}",
+        spatial_gvg_res.team_a_survivors, spatial_gvg_res.team_b_survivors);
+
+    // アスキーアート盤面スナップショットの表示
+    println!("\n   🗺️ --- 【空間GvG陣形激突アスキーアート盤面】 ---");
+    for snap in &spatial_gvg_res.ascii_snapshots {
+        println!("{}", snap);
+    }
+
+    println!("   📜 GvG交戦ログ:");
+    if spatial_gvg_res.logs.len() <= 8 {
+        for log in &spatial_gvg_res.logs {
+            println!("{}", log);
+        }
+    } else {
+        for log in spatial_gvg_res.logs.iter().take(4) {
+            println!("{}", log);
+        }
+        println!("      ... (中略 {} 行) ...", spatial_gvg_res.logs.len() - 8);
+        for log in spatial_gvg_res.logs.iter().skip(spatial_gvg_res.logs.len() - 4) {
+            println!("{}", log);
+        }
+    }
+    println!("   ✅ 空間GvG陣形激突検証完了\n");
+
+    // -------------------------------------------------------------------------
+    // Step 10: セーブ ＆ ロード往復検証（ファイル保存 ➔ 復元 ➔ 整合性アサーション）
+    // -------------------------------------------------------------------------
+    println!("💾 [Step 10/10] セーブ ＆ ロード往復完全一致検証");
     let save_path = "saves/save_data.ron";
     world.save_to_file(save_path)?;
     println!("   - ワールドステートを '{}' へシリアライズ保存完了", save_path);
@@ -324,7 +509,8 @@ fn run_headless_demo(db: &ModDatabase) -> Result<(), Box<dyn std::error::Error>>
 
     println!("================================================================================");
     println!("  🎉 【全システム統合シミュレーションおよびセーブ/ロード検証：SUCCESS】");
-    println!("  ステートフルなゲームエンジン（WorldState）への昇華が実証されました。");
+    println!("  ヘクス空間戦場・A*経路探索・建物フットプリント・射程と陣形タクティクスの");
+    println!("  完全自律動作が実証されました。");
     println!("================================================================================");
 
     Ok(())

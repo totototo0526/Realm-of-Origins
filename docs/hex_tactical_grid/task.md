@@ -1,0 +1,39 @@
+# タスクリスト: ヘクスグリッド空間戦場・A*経路探索・建物フットプリント・射程と陣形タクティクスの実装
+
+## 進捗ステータス
+- [x] 1. 設計とADRドキュメントの作成 (`docs/hex_tactical_grid/implementation_plan.md`, `task.md`)
+- [x] 2. ヘクスグリッド座標系とマップ構造の実装 (`src/hex_grid.rs`)
+    - [x] Axial座標系 (`HexCoord { q, r }`)、Cube座標相互変換、6方向隣接、ヘクス距離（Manhattan/Cube）計算
+    - [x] クォータービュー（アイソメトリック）2Dスクリーン座標変換 (`hex_to_pixel`, `pixel_to_hex`)
+    - [x] 指定半径内のヘクス取得（AoE範囲判定用）
+    - [x] 矩形障害物・建物フットプリント (`BuildingFootprint`) による通行不可（Blocked）マスク
+    - [x] チョークポイント（狭路）や建物の陰の配置機能
+    - [x] A*（エースター）経路探索アルゴリズム（障害物・他ユニットを迂回し、射程内に入る最短経路計算）
+    - [x] CUIコンソール用のアスキー/絵文字ヘクス戦場マップ描画関数 (`render_ascii_map`)
+    - [x] `src/hex_grid.rs` 内の単体テスト実装（距離、スクリーン座標、建物迂回A*経路探索）
+- [x] 3. モデル拡張と空間スキルの導入 (`src/models.rs`, `mods/core/skills.ron`, `mods/core/items_recipes.ron`)
+    - [x] 武器・スキル・モンスターの射程（`attack_range`）および移動間隔（`move_ticks`）
+    - [x] 空間スキル効果: 範囲攻撃（AoE: `AreaOfEffect { radius }`）、ノックバック（`Knockback { distance }`）
+    - [x] 空間ガンビット条件: `TargetDistanceAtLeast(u32)`, `TargetDistanceAtMost(u32)`, `EnemiesInRadius { radius, min_count }`
+    - [x] 陣形（Formation）構造体（前衛・中衛・後衛の初期配置）
+- [x] 4. 空間戦闘エンジンの実装 (`src/engine.rs`)
+    - [x] `Combatant` への `position: HexCoord`, `move_ticks: u32`, `next_move_tick: u32`, `attack_range: u32` の追加
+    - [x] `/noctrl` 空間再現: 射程外ならA*で1ヘクスずつ接近、射程内ならASPDで通常攻撃/スキル発動
+    - [x] ノックバック処理（後方への押し出し、壁衝突判定、距離増加による再接近）
+    - [x] 範囲攻撃（AoE）処理（指定ヘクス中心の周囲巻き込みダメージ計算）
+    - [x] 空間GvGシミュレーションの実装（陣形初期配置、A*移動激突、ノックバック・範囲スキル応酬）
+    - [x] 戦闘中・重要局面（開幕・大技発動・決着）におけるヘクス盤面アスキーアートスナップショット出力
+- [x] 5. 検証シナリオの実装と既存システム統合 (`src/main.rs`)
+    - [x] `--headless-demo` に空間タクティクス検証シナリオを統合:
+        - シナリオ1: チョークポイント防衛＆遠距離ハラスメント検証（壁ナイトが狭路を塞ぎ、後方からAoE・遠距離でモンスター完封）
+        - シナリオ2: 空間GvG陣形激突（自軍 vs 灰燼の学派/黒曜の旅団の空間対抗戦）
+    - [x] 既存のセーブ/ロード往復検証（Step 10）との両立・整合性確認
+- [x] 6. 自動テストの拡充と品質検証
+    - [x] `hex_grid` 単体テスト（距離、スクリーン座標、建物フットプリント迂回A*）
+    - [x] 空間戦闘結合テスト（射程外からの接近、ノックバックによる距離離脱、AoE巻き込み）
+    - [x] `cargo test` で全テスト（12件）完全パスを確認
+    - [x] `cargo run -- --headless-demo` の完走と出力ログ検証
+- [ ] 7. ドキュメント作成とバージョン管理
+    - [ ] `docs/hex_tactical_grid/walkthrough.md` の作成
+    - [ ] `agent.md` および `README_DEV.md` の更新
+    - [ ] Git commit & push の実行

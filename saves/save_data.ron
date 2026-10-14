@@ -8,6 +8,7 @@
             name: "ダマスカス",
             slot: Weapon,
             weapon_atk: 118,
+            attack_range: 1,
             refine: 0,
             slots: 2,
             cards: [],
@@ -19,6 +20,7 @@
             name: "ダマスカス",
             slot: Weapon,
             weapon_atk: 118,
+            attack_range: 1,
             refine: 0,
             slots: 2,
             cards: [],
@@ -30,6 +32,7 @@
             name: "チェーンメイル",
             slot: Armor,
             weapon_atk: 0,
+            attack_range: 1,
             refine: 0,
             slots: 1,
             cards: [],
@@ -38,14 +41,14 @@
         ),
     ],
     storage_items: {
+        "coal": 60,
+        "oridecon": 25,
+        "card_andre": 4,
+        "iron_ore": 85,
+        "card_doppelganger": 1,
         "red_potion": 50,
         "card_sidewinder": 2,
         "white_potion": 15,
-        "oridecon": 25,
-        "iron_ore": 85,
-        "coal": 60,
-        "card_andre": 4,
-        "card_doppelganger": 1,
     },
     active_character: (
         id: "char_gen2_shadow",
@@ -66,6 +69,7 @@
                 name: "ダマスカス",
                 slot: Weapon,
                 weapon_atk: 118,
+                attack_range: 1,
                 refine: 6,
                 slots: 2,
                 cards: [
@@ -97,6 +101,9 @@
                 name: "バッシュ(必中強撃)",
                 level: 10,
                 sp_cost: 15,
+                attack_range: 1,
+                aoe_radius: None,
+                knockback_distance: None,
                 magic_multiplier: None,
                 physical_multiplier: Some(2.6),
                 is_sure_hit: true,
@@ -116,6 +123,10 @@
         generation: 2,
         exp: 0,
         activity_score: 100,
+        formation: (
+            role: Frontline,
+            priority_target_role: None,
+        ),
     ),
     active_growth_plan: AgiCrit,
     party_members: [
@@ -138,6 +149,7 @@
                     name: "ツルギ",
                     slot: Weapon,
                     weapon_atk: 100,
+                    attack_range: 1,
                     refine: 4,
                     slots: 2,
                     cards: [],
@@ -150,6 +162,10 @@
             generation: 1,
             exp: 0,
             activity_score: 100,
+            formation: (
+                role: Frontline,
+                priority_target_role: None,
+            ),
         ),
         (
             id: "char_otto",
@@ -170,6 +186,10 @@
             generation: 1,
             exp: 0,
             activity_score: 100,
+            formation: (
+                role: Backline,
+                priority_target_role: None,
+            ),
         ),
     ],
     roster: (
@@ -194,6 +214,10 @@
                 generation: 1,
                 exp: 20000,
                 activity_score: 50,
+                formation: (
+                    role: Frontline,
+                    priority_target_role: None,
+                ),
             ),
             (
                 id: "char_reserve_priest",
@@ -214,6 +238,10 @@
                 generation: 1,
                 exp: 20000,
                 activity_score: 50,
+                formation: (
+                    role: Frontline,
+                    priority_target_role: None,
+                ),
             ),
             (
                 id: "char_reserve_thief",
@@ -234,6 +262,10 @@
                 generation: 1,
                 exp: 20000,
                 activity_score: 50,
+                formation: (
+                    role: Frontline,
+                    priority_target_role: None,
+                ),
             ),
             (
                 id: "char_gen1_carry",
@@ -254,6 +286,7 @@
                         name: "ダマスカス",
                         slot: Weapon,
                         weapon_atk: 118,
+                        attack_range: 1,
                         refine: 6,
                         slots: 2,
                         cards: [
@@ -284,6 +317,10 @@
                 generation: 1,
                 exp: 1664,
                 activity_score: 55,
+                formation: (
+                    role: Midline,
+                    priority_target_role: None,
+                ),
             ),
         ],
         retired_town_npcs: [],
@@ -318,6 +355,7 @@
                             name: "+8クリシュナ",
                             slot: Weapon,
                             weapon_atk: 140,
+                            attack_range: 1,
                             refine: 8,
                             slots: 2,
                             cards: [],
@@ -330,6 +368,10 @@
                     generation: 1,
                     exp: 0,
                     activity_score: 100,
+                    formation: (
+                        role: Midline,
+                        priority_target_role: None,
+                    ),
                 ),
                 (
                     id: "rival_obsidian_2",
@@ -350,6 +392,10 @@
                     generation: 1,
                     exp: 0,
                     activity_score: 100,
+                    formation: (
+                        role: Frontline,
+                        priority_target_role: None,
+                    ),
                 ),
                 (
                     id: "rival_obsidian_3",
@@ -370,6 +416,10 @@
                     generation: 1,
                     exp: 0,
                     activity_score: 100,
+                    formation: (
+                        role: Frontline,
+                        priority_target_role: None,
+                    ),
                 ),
             ],
         ),
@@ -380,11 +430,11 @@
                     id: "rival_iron_1",
                     name: "聖騎士アイゼン",
                     job_id: "crusader",
-                    level: 48,
+                    level: 47,
                     base_stats: (
-                        str: 42,
+                        str: 40,
                         agi: 20,
-                        vit: 97,
+                        vit: 95,
                         int: 20,
                         dex: 40,
                         luk: 25,
@@ -395,6 +445,7 @@
                             name: "+9反射のバックラー",
                             slot: Shield,
                             weapon_atk: 10,
+                            attack_range: 1,
                             refine: 9,
                             slots: 1,
                             cards: [],
@@ -407,6 +458,10 @@
                     generation: 1,
                     exp: 0,
                     activity_score: 100,
+                    formation: (
+                        role: Frontline,
+                        priority_target_role: None,
+                    ),
                 ),
                 (
                     id: "rival_iron_2",
@@ -427,6 +482,10 @@
                     generation: 1,
                     exp: 0,
                     activity_score: 100,
+                    formation: (
+                        role: Frontline,
+                        priority_target_role: None,
+                    ),
                 ),
                 (
                     id: "rival_iron_3",
@@ -447,6 +506,10 @@
                     generation: 1,
                     exp: 0,
                     activity_score: 100,
+                    formation: (
+                        role: Backline,
+                        priority_target_role: None,
+                    ),
                 ),
             ],
         ),
@@ -457,11 +520,11 @@
                     id: "rival_ash_1",
                     name: "大魔導アルス",
                     job_id: "wizard",
-                    level: 46,
+                    level: 47,
                     base_stats: (
-                        str: 10,
+                        str: 12,
                         agi: 20,
-                        vit: 35,
+                        vit: 37,
                         int: 95,
                         dex: 65,
                         luk: 20,
@@ -472,6 +535,7 @@
                             name: "+8知力の大杖",
                             slot: Weapon,
                             weapon_atk: 90,
+                            attack_range: 4,
                             refine: 8,
                             slots: 2,
                             cards: [],
@@ -484,6 +548,10 @@
                     generation: 1,
                     exp: 0,
                     activity_score: 100,
+                    formation: (
+                        role: Backline,
+                        priority_target_role: None,
+                    ),
                 ),
                 (
                     id: "rival_ash_2",
@@ -504,6 +572,10 @@
                     generation: 1,
                     exp: 0,
                     activity_score: 100,
+                    formation: (
+                        role: Midline,
+                        priority_target_role: None,
+                    ),
                 ),
                 (
                     id: "rival_ash_3",
@@ -524,74 +596,22 @@
                     generation: 1,
                     exp: 0,
                     activity_score: 100,
+                    formation: (
+                        role: Backline,
+                        priority_target_role: None,
+                    ),
                 ),
             ],
         ),
     ],
     market: (
         items: {
-            "coal": (
-                id: "coal",
-                name: "石炭",
-                base_price: 400,
-                current_stock: 291,
-                target_stock: 300,
-            ),
             "white_potion": (
                 id: "white_potion",
                 name: "白ポーション",
                 base_price: 120,
                 current_stock: 200,
                 target_stock: 200,
-            ),
-            "shadow_armor": (
-                id: "shadow_armor",
-                name: "シャドウメイル",
-                base_price: 32000,
-                current_stock: 10,
-                target_stock: 10,
-            ),
-            "steel": (
-                id: "steel",
-                name: "鋼鉄",
-                base_price: 2500,
-                current_stock: 91,
-                target_stock: 100,
-            ),
-            "empty_bottle": (
-                id: "empty_bottle",
-                name: "空瓶",
-                base_price: 10,
-                current_stock: 500,
-                target_stock: 500,
-            ),
-            "buckler": (
-                id: "buckler",
-                name: "ミラーバックラー",
-                base_price: 18000,
-                current_stock: 15,
-                target_stock: 15,
-            ),
-            "white_herb": (
-                id: "white_herb",
-                name: "白ハーブ",
-                base_price: 30,
-                current_stock: 500,
-                target_stock: 500,
-            ),
-            "oridecon": (
-                id: "oridecon",
-                name: "オリデオコン",
-                base_price: 8000,
-                current_stock: 47,
-                target_stock: 50,
-            ),
-            "iron_ore": (
-                id: "iron_ore",
-                name: "鉄鉱石",
-                base_price: 80,
-                current_stock: 612,
-                target_stock: 600,
             ),
             "shield": (
                 id: "shield",
@@ -600,12 +620,75 @@
                 current_stock: 15,
                 target_stock: 15,
             ),
+            "lance": (
+                id: "lance",
+                name: "パルチザン(長槍)",
+                base_price: 42000,
+                current_stock: 15,
+                target_stock: 15,
+            ),
+            "empty_bottle": (
+                id: "empty_bottle",
+                name: "空瓶",
+                base_price: 10,
+                current_stock: 500,
+                target_stock: 500,
+            ),
             "damascus": (
                 id: "damascus",
                 name: "ダマスカス短剣",
                 base_price: 35000,
                 current_stock: 17,
                 target_stock: 20,
+            ),
+            "oridecon": (
+                id: "oridecon",
+                name: "オリデオコン",
+                base_price: 8000,
+                current_stock: 47,
+                target_stock: 50,
+            ),
+            "buckler": (
+                id: "buckler",
+                name: "ミラーバックラー",
+                base_price: 18000,
+                current_stock: 15,
+                target_stock: 15,
+            ),
+            "shadow_armor": (
+                id: "shadow_armor",
+                name: "シャドウメイル",
+                base_price: 32000,
+                current_stock: 10,
+                target_stock: 10,
+            ),
+            "iron_ore": (
+                id: "iron_ore",
+                name: "鉄鉱石",
+                base_price: 80,
+                current_stock: 612,
+                target_stock: 600,
+            ),
+            "coal": (
+                id: "coal",
+                name: "石炭",
+                base_price: 400,
+                current_stock: 291,
+                target_stock: 300,
+            ),
+            "white_herb": (
+                id: "white_herb",
+                name: "白ハーブ",
+                base_price: 30,
+                current_stock: 500,
+                target_stock: 500,
+            ),
+            "steel": (
+                id: "steel",
+                name: "鋼鉄",
+                base_price: 2500,
+                current_stock: 91,
+                target_stock: 100,
             ),
             "full_plate": (
                 id: "full_plate",
@@ -614,18 +697,25 @@
                 current_stock: 10,
                 target_stock: 10,
             ),
+            "hunter_bow": (
+                id: "hunter_bow",
+                name: "ハンターボウ(長弓)",
+                base_price: 48000,
+                current_stock: 15,
+                target_stock: 15,
+            ),
         },
         recipes: {
-            "white_potion": (
-                output_item_id: "white_potion",
+            "damascus": (
+                output_item_id: "damascus",
                 output_count: 1,
                 ingredients: [
                     (
-                        item_id: "white_herb",
-                        count: 2,
+                        item_id: "steel",
+                        count: 3,
                     ),
                     (
-                        item_id: "empty_bottle",
+                        item_id: "oridecon",
                         count: 1,
                     ),
                 ],
@@ -644,16 +734,16 @@
                     ),
                 ],
             ),
-            "damascus": (
-                output_item_id: "damascus",
+            "white_potion": (
+                output_item_id: "white_potion",
                 output_count: 1,
                 ingredients: [
                     (
-                        item_id: "steel",
-                        count: 3,
+                        item_id: "white_herb",
+                        count: 2,
                     ),
                     (
-                        item_id: "oridecon",
+                        item_id: "empty_bottle",
                         count: 1,
                     ),
                 ],
@@ -670,7 +760,7 @@
     ),
     active_dispatch: None,
     rival_league_logs: [
-        " ⚔\u{fe0f} [ギルドリーグ裏対決] 『鉄棺騎士団』が『黒曜の旅団』との模擬戦を制しました！（勝者戦力微増）",
-        " ⚔\u{fe0f} [ギルドリーグ裏対決] 『灰燼の学派』が『黒曜の旅団』との模擬戦を制しました！（勝者戦力微増）",
+        " ⚔\u{fe0f} [ギルドリーグ裏対決] 『灰燼の学派』が『鉄棺騎士団』との模擬戦を制しました！（勝者戦力微増）",
+        " ⚔\u{fe0f} [ギルドリーグ裏対決] 『灰燼の学派』が『鉄棺騎士団』との模擬戦を制しました！（勝者戦力微増）",
     ],
 )
