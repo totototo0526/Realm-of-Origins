@@ -1,0 +1,30 @@
+# Task: フェーズ5 - 完全データ駆動化・統合ワールドステート・セーブ/ロード・インタラクティブゲームループ
+
+- [x] ドキュメント整備と初期設計 <!-- id: 0 -->
+    - [x] `docs/world_state_interactive/task.md` の作成 <!-- id: 1 -->
+    - [x] `docs/world_state_interactive/implementation_plan.md` の作成 <!-- id: 2 -->
+    - [x] `agent.md` のステータス更新 <!-- id: 3 -->
+- [x] 完全データ駆動化（Core MODの拡充） <!-- id: 4 -->
+    - [x] `mods/core/items_recipes.ron` の作成（市場アイテム、ベース装備、BOM製造レシピ） <!-- id: 5 -->
+    - [x] `mods/core/areas.ron` の作成（狩場エリア、出現モンスター、推奨Lv、派遣ドロップ、消費コスト） <!-- id: 6 -->
+    - [x] `src/models.rs` および `src/loader.rs` の拡張（ItemDef, RecipeDef, AreaDefの読み込み） <!-- id: 7 -->
+    - [x] `src/market.rs` の外部データ対応（BOMレシピ・初期在庫のデータ駆動化） <!-- id: 8 -->
+    - [x] `src/dispatch.rs` の外部データ対応（AreaDefに基づく派遣先・消費・ドロップテーブルの汎用化） <!-- id: 9 -->
+- [x] 統合ワールドステート（`src/world.rs`）とセーブ/ロード機能 <!-- id: 10 -->
+    - [x] `WorldState` 構造体の設計・実装（世代、カレンダーTick、Zeny、倉庫、現役キャラ、同行PT、ギルド名簿、複数ライバルギルドリーグ、市場状態、派遣状態） <!-- id: 11 -->
+    - [x] セーブ＆ロード処理（`saves/save_data.ron` への永続化と復元） <!-- id: 12 -->
+    - [x] ワールドTick同期進行処理（冒険1回ごとの裏での派遣進行、市場自然回復・BOM補充、ライバルギルド同士の裏リーグ戦・戦力成長） <!-- id: 13 -->
+- [x] インタラクティブCUIと自動検証モードの両立 (`src/main.rs`) <!-- id: 14 -->
+    - [x] コマンドライン引数処理（`--headless-demo` vs 通常インタラクティブCUI） <!-- id: 15 -->
+    - [x] インタラクティブCUIメニュー構築（冒険・養殖、編成・装備・ガンビット、クホホ工場、市場売買、自動派遣、レガシー転生・FA処遇、ギルドリーグGvG、セーブ/ロード/終了） <!-- id: 16 -->
+    - [x] `--headless-demo` モードの自動検証スクリプト統合（フェーズ1〜4の全機能＆ワールド遷移＆セーブ/ロード往復検証） <!-- id: 17 -->
+- [x] 単体テスト・結合テストの実装と検証 <!-- id: 18 -->
+    - [x] `WorldState` のセーブ＆ロード往復一致テスト <!-- id: 19 -->
+    - [x] BOM市場の価格伝播テスト <!-- id: 20 -->
+    - [x] ターン進行と裏リーグ同期テスト <!-- id: 21 -->
+    - [x] `cargo test` 全件パス確認 <!-- id: 22 -->
+    - [x] `--headless-demo` および インタラクティブモードの動作確認 <!-- id: 23 -->
+- [x] ドキュメント更新とコミット <!-- id: 24 -->
+    - [x] `docs/world_state_interactive/walkthrough.md` の作成 <!-- id: 25 -->
+    - [x] `agent.md`, `README_DEV.md` の更新 <!-- id: 26 -->
+    - [x] git commit & git push <!-- id: 27 -->

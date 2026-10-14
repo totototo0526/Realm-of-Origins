@@ -62,8 +62,7 @@ impl BuildTag {
 }
 
 /// FA（フリーエージェント）退団候補に対する処遇選択肢
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FaDecision {
     /// ギルドに残留させる
     Retain,
@@ -74,8 +73,7 @@ pub enum FaDecision {
 }
 
 /// 街のNPC化したメンバーによるギルド永続パッシブ恩恵
-#[derive(Debug, Clone, Default)]
-#[allow(dead_code)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TownPassiveBonus {
     pub extra_weapon_atk_percent: f32,
     pub extra_zeny_percent: f32,
@@ -83,8 +81,7 @@ pub struct TownPassiveBonus {
 }
 
 /// ギルド名簿管理システム
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuildRoster {
     pub max_capacity: usize,
     pub active_members: Vec<Character>,
@@ -181,7 +178,7 @@ impl GuildRoster {
 }
 
 /// ライバルギルド
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RivalGuild {
     pub name: String,
     pub roster: Vec<Character>,

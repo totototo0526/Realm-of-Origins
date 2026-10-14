@@ -1,7 +1,10 @@
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use crate::loader::ModDatabase;
+use crate::models::ItemDef;
 
 /// 市場で売買されるアイテムの在庫および価格情報
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MarketItem {
     pub id: String,
     pub name: String,
@@ -18,6 +21,16 @@ impl MarketItem {
             base_price,
             current_stock: initial_stock,
             target_stock,
+        }
+    }
+
+    pub fn from_def(def: &ItemDef) -> Self {
+        Self {
+            id: def.id.clone(),
+            name: def.name.clone(),
+            base_price: def.base_price,
+            current_stock: def.initial_stock,
+            target_stock: def.target_stock,
         }
     }
 
@@ -44,7 +57,6 @@ impl MarketItem {
     }
 
     /// 自然回復（目標在庫へ少しずつ復帰）
-    #[allow(dead_code)]
     pub fn natural_recovery(&mut self, rate: f64) {
         let diff = self.target_stock - self.current_stock;
         if diff != 0 {
@@ -63,14 +75,14 @@ impl MarketItem {
 }
 
 /// BOM（製造レシピ）の原材料要件
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecipeIngredient {
     pub item_id: String,
     pub count: u32,
 }
 
 /// BOM（製造レシピ）定義
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Recipe {
     pub output_item_id: String,
     pub output_count: u32,
@@ -78,9 +90,11 @@ pub struct Recipe {
 }
 
 /// 在庫変動とBOM連動を備えた市場システム
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MarketSystem {
     pub items: HashMap<String, MarketItem>,
     pub recipes: HashMap<String, Recipe>,
+    #[serde(default)]
     pub event_log: Vec<String>,
 }
 
@@ -95,7 +109,42 @@ impl MarketSystem {
         system
     }
 
-    /// デフォルトの市場アイテムとBOMレシピの初期化
+    /// MODデータベース（items_recipes.ron）から市場システムを構築する
+    pub fn from_database(db: &ModDatabase) -> Self {
+        let mut system = Self {
+            items: HashMap::new(),
+            recipes: HashMap::new(),
+            event_log: Vec::new(),
+        };
+
+        if db.items.is_empty() {
+            system.initialize_default_market();
+            return system;
+        }
+
+        for item_def in db.items.values() {
+            system.register_item(MarketItem::from_def(item_def));
+        }
+
+        for recipe_def in db.recipes.values() {
+            system.register_recipe(Recipe {
+                output_item_id: recipe_def.output_item_id.clone(),
+                output_count: recipe_def.output_count,
+                ingredients: recipe_def
+                    .ingredients
+                    .iter()
+                    .map(|ing| RecipeIngredient {
+                        item_id: ing.item_id.clone(),
+                        count: ing.count,
+                    })
+                    .collect(),
+            });
+        }
+
+        system
+    }
+
+    /// デフォルトの市場アイテムとBOMレシピの初期化（外部データ未提供時のフォールバック）
     fn initialize_default_market(&mut self) {
         // 完成品・消費アイテム
         self.register_item(MarketItem::new("white_potion", "白ポーション", 120, 200, 200));
@@ -224,6 +273,11 @@ impl MarketSystem {
         for item in self.items.values_mut() {
             item.natural_recovery(rate);
         }
+    }
+
+    /// ワールドターン進行時の自然回復（デフォルト8%復元）
+    pub fn natural_recovery(&mut self) {
+        self.tick_recovery(0.08);
     }
 
     /// 特需イベント（特定アイテムの需要急増など）

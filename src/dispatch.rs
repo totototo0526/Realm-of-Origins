@@ -1,13 +1,16 @@
 use std::collections::HashMap;
-use crate::models::Character;
+use serde::{Deserialize, Serialize};
+use crate::models::{AreaDef, Character};
 
 /// 自動派遣の目的地（ファーミング先）
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DispatchDestination {
     /// 廃鉱山（鉄鉱石、石炭、オリデオコンなどの鉱物素材）
     AbandonedMine,
     /// 薬草の湿原（白ハーブ、空瓶などの薬品素材）
     HerbForest,
+    /// 外部エリア定義ID
+    Custom(String),
 }
 
 impl DispatchDestination {
@@ -15,12 +18,13 @@ impl DispatchDestination {
         match self {
             Self::AbandonedMine => "廃坑の深層（鉱山資源採掘）",
             Self::HerbForest => "妖精の薬草園（白ハーブ採集）",
+            Self::Custom(_) => "外部開拓エリア",
         }
     }
 }
 
 /// 派遣部隊のシナジー効果
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DispatchSynergy {
     pub active_synergies: Vec<String>,
     pub yield_multiplier: f64,      // 素材獲得量倍率（基本1.0）
@@ -28,11 +32,21 @@ pub struct DispatchSynergy {
     pub extra_rare_chance: f64,     // レア素材追加率
 }
 
+/// 進行中の自動派遣ミッション（ワールドステートで管理）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActiveDispatch {
+    pub area_id: String,
+    pub area_name: String,
+    pub members: Vec<Character>,
+    pub ticks_remaining: u32,
+    pub cycles: u32,
+}
+
 /// 自動派遣システム
 pub struct DispatchSystem;
 
 /// 派遣1回あたりの成果
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(dead_code)]
 pub struct DispatchResult {
     pub destination: DispatchDestination,
@@ -90,10 +104,10 @@ impl DispatchSystem {
         synergy
     }
 
-    /// 控え部隊を指定した回数（サイクル）派遣して裏作業を実行
-    pub fn dispatch(
+    /// 外部エリア定義（AreaDef）に基づき、控え部隊を派遣して裏作業を実行
+    pub fn dispatch_to_area(
         members: &[Character],
-        destination: DispatchDestination,
+        area: &AreaDef,
         cycles: u32,
         available_potions: &mut u32,
     ) -> DispatchResult {
@@ -106,7 +120,7 @@ impl DispatchSystem {
         logs.push(format!(
             "🚩 控え部隊（{}名）を 『{}』 へ {}サイクル 派遣開始！",
             members.len(),
-            destination.name_ja(),
+            area.name,
             cycles
         ));
 
@@ -114,8 +128,8 @@ impl DispatchSystem {
             logs.push(format!("   ✨ シナジー発動: {}", syn));
         }
 
-        // 1サイクルあたりの基礎ポーション消費数: 2本
-        let base_potion_cost = 2.0;
+        // エリアのスタミナ消費コスト（デフォルトは白ポーション2本）
+        let base_potion_cost = area.stamina_cost_item.as_ref().map(|(_, c)| *c as f64).unwrap_or(2.0);
         let effective_potion_cost = (base_potion_cost * (1.0 - synergy.cost_reduction_rate)).round().max(1.0) as u32;
 
         for cycle in 1..=cycles {
@@ -130,30 +144,21 @@ impl DispatchSystem {
             *available_potions -= effective_potion_cost;
             total_potions_consumed += effective_potion_cost;
 
-            // 目的地に応じた獲得素材
-            match destination {
-                DispatchDestination::AbandonedMine => {
-                    // 基礎採掘量: 鉄鉱石 10個, 石炭 5個, オリデオコン 1個
-                    let iron = ((10.0 * synergy.yield_multiplier).round()) as u32;
-                    let coal = ((5.0 * synergy.yield_multiplier).round()) as u32;
-                    *gathered_items.entry("iron_ore".to_string()).or_insert(0) += iron;
-                    *gathered_items.entry("coal".to_string()).or_insert(0) += coal;
-
-                    if synergy.extra_rare_chance > 0.0 || cycle % 2 == 0 {
-                        let ori = ((1.0 * synergy.yield_multiplier).round()) as u32;
-                        *gathered_items.entry("oridecon".to_string()).or_insert(0) += ori;
+            // ドロップテーブルに基づいて素材を獲得
+            for drop_def in &area.dispatch_drops {
+                if drop_def.is_rare {
+                    // レア素材: 奇数サイクルまたはレア率ボーナスで獲得
+                    if cycle % 2 == 0 || synergy.extra_rare_chance > 0.0 {
+                        let count = ((drop_def.base_count as f64 * synergy.yield_multiplier).round()).max(1.0) as u32;
+                        *gathered_items.entry(drop_def.item_id.clone()).or_insert(0) += count;
                     }
-                    total_zeny += 500;
-                }
-                DispatchDestination::HerbForest => {
-                    // 基礎採掘量: 白ハーブ 15個, 空瓶 10個
-                    let herb = ((15.0 * synergy.yield_multiplier).round()) as u32;
-                    let bottle = ((10.0 * synergy.yield_multiplier).round()) as u32;
-                    *gathered_items.entry("white_herb".to_string()).or_insert(0) += herb;
-                    *gathered_items.entry("empty_bottle".to_string()).or_insert(0) += bottle;
-                    total_zeny += 400;
+                } else {
+                    let count = ((drop_def.base_count as f64 * synergy.yield_multiplier).round()).max(1.0) as u32;
+                    *gathered_items.entry(drop_def.item_id.clone()).or_insert(0) += count;
                 }
             }
+
+            total_zeny += area.base_zeny_reward;
         }
 
         logs.push(format!(
@@ -162,7 +167,7 @@ impl DispatchSystem {
         ));
 
         DispatchResult {
-            destination,
+            destination: DispatchDestination::Custom(area.id.clone()),
             cycles,
             gathered_items,
             zeny_earned: total_zeny,
@@ -170,6 +175,56 @@ impl DispatchSystem {
             synergy,
             logs,
         }
+    }
+
+    /// 従来のDispatchDestinationに基づく派遣（後方互換用）
+    pub fn dispatch(
+        members: &[Character],
+        destination: DispatchDestination,
+        cycles: u32,
+        available_potions: &mut u32,
+    ) -> DispatchResult {
+        let (area_id, area_name, drops, base_zeny) = match destination {
+            DispatchDestination::AbandonedMine => (
+                "abandoned_mine",
+                "廃坑の深層（鉱山資源採掘）",
+                vec![
+                    crate::models::DispatchDropDef { item_id: "iron_ore".to_string(), base_count: 10, is_rare: false },
+                    crate::models::DispatchDropDef { item_id: "coal".to_string(), base_count: 5, is_rare: false },
+                    crate::models::DispatchDropDef { item_id: "oridecon".to_string(), base_count: 1, is_rare: true },
+                ],
+                500,
+            ),
+            DispatchDestination::HerbForest => (
+                "herb_forest",
+                "妖精の薬草園（白ハーブ採集）",
+                vec![
+                    crate::models::DispatchDropDef { item_id: "white_herb".to_string(), base_count: 15, is_rare: false },
+                    crate::models::DispatchDropDef { item_id: "empty_bottle".to_string(), base_count: 10, is_rare: false },
+                ],
+                400,
+            ),
+            DispatchDestination::Custom(ref id) => (
+                id.as_str(),
+                "未知の開拓地",
+                vec![],
+                300,
+            ),
+        };
+
+        let temp_area = AreaDef {
+            id: area_id.to_string(),
+            name: area_name.to_string(),
+            recommended_level: 20,
+            stamina_cost_item: Some(("white_potion".to_string(), 2)),
+            monsters: vec![],
+            dispatch_drops: drops,
+            base_zeny_reward: base_zeny,
+        };
+
+        let mut res = Self::dispatch_to_area(members, &temp_area, cycles, available_potions);
+        res.destination = destination;
+        res
     }
 }
 

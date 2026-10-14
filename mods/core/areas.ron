@@ -1,0 +1,48 @@
+[
+    (
+        id: "abandoned_mine",
+        name: "廃坑の深層（鉱山資源採掘）",
+        recommended_level: 25,
+        stamina_cost_item: Some(("white_potion", 2)),
+        monsters: [
+            "orc_warrior",
+            "high_orc",
+        ],
+        dispatch_drops: [
+            (item_id: "iron_ore", base_count: 10, is_rare: false),
+            (item_id: "coal", base_count: 5, is_rare: false),
+            (item_id: "oridecon", base_count: 1, is_rare: true),
+        ],
+        base_zeny_reward: 500,
+    ),
+    (
+        id: "herb_forest",
+        name: "妖精の薬草園（白ハーブ採集）",
+        recommended_level: 15,
+        stamina_cost_item: Some(("white_potion", 2)),
+        monsters: [
+            "orc_warrior",
+        ],
+        dispatch_drops: [
+            (item_id: "white_herb", base_count: 15, is_rare: false),
+            (item_id: "empty_bottle", base_count: 10, is_rare: false),
+        ],
+        base_zeny_reward: 400,
+    ),
+    (
+        id: "orc_dungeon",
+        name: "オーク集落の地下洞窟（高難度試練）",
+        recommended_level: 45,
+        stamina_cost_item: Some(("white_potion", 3)),
+        monsters: [
+            "orc_warrior",
+            "high_orc",
+        ],
+        dispatch_drops: [
+            (item_id: "steel", base_count: 3, is_rare: false),
+            (item_id: "oridecon", base_count: 2, is_rare: true),
+            (item_id: "damascus", base_count: 1, is_rare: true),
+        ],
+        base_zeny_reward: 1200,
+    ),
+]

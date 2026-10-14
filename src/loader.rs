@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::models::{Card, Job, MonsterTemplate, Skill};
+use crate::models::{AreaDef, Card, ItemDef, ItemsAndRecipesData, Job, MonsterTemplate, RecipeDef, Skill};
 
 /// mods/core/ 等のMODデータ群を一元管理するデータベース
 #[derive(Debug, Clone, Default)]
@@ -11,6 +11,9 @@ pub struct ModDatabase {
     pub cards: HashMap<String, Card>,
     pub skills: HashMap<String, Skill>,
     pub monsters: HashMap<String, MonsterTemplate>,
+    pub items: HashMap<String, ItemDef>,
+    pub recipes: HashMap<String, RecipeDef>,
+    pub areas: HashMap<String, AreaDef>,
 }
 
 impl ModDatabase {
@@ -64,6 +67,33 @@ impl ModDatabase {
                 .map_err(|e| format!("{} のパースに失敗しました: {}", monsters_path.display(), e))?;
             for item in list {
                 db.monsters.insert(item.id.clone(), item);
+            }
+        }
+
+        // 5. アイテムとレシピ (items_recipes.ron)
+        let items_path = dir.join("items_recipes.ron");
+        if items_path.exists() {
+            let content = fs::read_to_string(&items_path)
+                .map_err(|e| format!("{} の読み込みに失敗しました: {}", items_path.display(), e))?;
+            let data: ItemsAndRecipesData = ron::from_str(&content)
+                .map_err(|e| format!("{} のパースに失敗しました: {}", items_path.display(), e))?;
+            for item in data.items {
+                db.items.insert(item.id.clone(), item);
+            }
+            for recipe in data.recipes {
+                db.recipes.insert(recipe.output_item_id.clone(), recipe);
+            }
+        }
+
+        // 6. 狩場エリア (areas.ron)
+        let areas_path = dir.join("areas.ron");
+        if areas_path.exists() {
+            let content = fs::read_to_string(&areas_path)
+                .map_err(|e| format!("{} の読み込みに失敗しました: {}", areas_path.display(), e))?;
+            let list: Vec<AreaDef> = ron::from_str(&content)
+                .map_err(|e| format!("{} のパースに失敗しました: {}", areas_path.display(), e))?;
+            for area in list {
+                db.areas.insert(area.id.clone(), area);
             }
         }
 

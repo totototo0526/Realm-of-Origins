@@ -403,3 +403,72 @@ pub struct SpawnedMonster {
     pub max_hp: u32,
     pub drops: Vec<DropItem>,
 }
+
+/// アイテム定義（市場やドロップ、装備の基本メタデータ）
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ItemDef {
+    pub id: String,
+    pub name: String,
+    pub base_price: u32,
+    pub initial_stock: i32,
+    pub target_stock: i32,
+    #[serde(default)]
+    pub is_equipment: bool,
+    #[serde(default)]
+    pub equip_slot: Option<EquipSlot>,
+    #[serde(default)]
+    pub base_atk: Option<u32>,
+    #[serde(default)]
+    pub base_def: Option<u32>,
+    #[serde(default)]
+    pub slots: Option<u8>,
+}
+
+/// BOM（製造レシピ）の原材料要件
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecipeIngredientDef {
+    pub item_id: String,
+    pub count: u32,
+}
+
+/// BOM（製造レシピ）定義
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecipeDef {
+    pub output_item_id: String,
+    pub output_count: u32,
+    pub ingredients: Vec<RecipeIngredientDef>,
+}
+
+/// アイテム＆レシピの一括定義ファイル（items_recipes.ron）のルート構造体
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ItemsAndRecipesData {
+    pub items: Vec<ItemDef>,
+    pub recipes: Vec<RecipeDef>,
+}
+
+/// 派遣時のドロップ設定
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DispatchDropDef {
+    pub item_id: String,
+    pub base_count: u32,
+    #[serde(default)]
+    pub is_rare: bool,
+}
+
+/// 狩場エリア定義（areas.ron）
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AreaDef {
+    pub id: String,
+    pub name: String,
+    pub recommended_level: u32,
+    /// 挑戦時/派遣時のスタミナ・消耗品コスト (アイテムID, 消費数)
+    #[serde(default)]
+    pub stamina_cost_item: Option<(String, u32)>,
+    /// 出現モンスターのテンプレートID一覧
+    pub monsters: Vec<String>,
+    /// 派遣ファーミング時のドロップテーブル
+    pub dispatch_drops: Vec<DispatchDropDef>,
+    /// 派遣1サイクルあたりの基礎獲得Zeny
+    pub base_zeny_reward: u32,
+}
+
