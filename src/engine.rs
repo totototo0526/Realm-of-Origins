@@ -100,6 +100,7 @@ impl Combatant {
             exp: 0,
             activity_score: 100,
             formation: TacticalFormation::new(FormationRole::Frontline),
+            unallocated_pts: 0,
         };
 
         let c_stats = CombatStats {

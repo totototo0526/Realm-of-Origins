@@ -96,9 +96,11 @@ impl Progression {
                 // レベルアップごとにステータスポイント獲得（Lvに応じて増加、平均4〜6ポイント）
                 let points = 4 + (character.level / 15) as u16;
                 plan.allocate_points(&mut character.base_stats, points);
+                // 手動育成用に未割り振りポイントプールにも加算
+                character.unallocated_pts += points as u32;
 
                 logs.push(format!(
-                    "   🎉 【LEVEL UP!】{} が Lv.{} に到達！ (+{} ステータスPを【{}】方針で配分)",
+                    "   🎉 【LEVEL UP!】{} が Lv.{} に到達！ (+{} ステータスP獲得/【{}】方針適用)",
                     character.name, character.level, points, plan.name_ja()
                 ));
             } else {
@@ -107,6 +109,12 @@ impl Progression {
         }
 
         level_ups
+    }
+
+    /// 現在のレベルと世代に応じた総獲得ステータスポイントを計算
+    /// Why: [再振り] 時に全額返還プールを計算するために使用
+    pub fn calculate_total_earned_stat_points(level: u32, generation: u8) -> u32 {
+        level.saturating_sub(1) * 6 + (generation as u32) * 10
     }
 
     /// レガシー転生キャラの生成
@@ -121,10 +129,13 @@ impl Progression {
         let mut base_stats = Stats::new(10, 10, 10, 10, 10, 10);
 
         // レガシー転生ボーナス: (generation - 1) * 8 ポイントを初期ステータスに加算
-        if generation > 1 {
-            let bonus_points = (generation as u16 - 1) * 8;
-            plan.allocate_points(&mut base_stats, bonus_points);
-        }
+        let bonus_points = if generation > 1 {
+            let pts = (generation as u16 - 1) * 8;
+            plan.allocate_points(&mut base_stats, pts);
+            pts as u32
+        } else {
+            0
+        };
 
         Character {
             id: id.to_string(),
@@ -139,6 +150,7 @@ impl Progression {
             exp: 0,
             activity_score: 100,
             formation: crate::models::TacticalFormation::default(),
+            unallocated_pts: bonus_points,
         }
     }
 }

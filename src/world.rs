@@ -97,6 +97,7 @@ impl WorldState {
                 role: FormationRole::Frontline,
                 priority_target_role: None,
             },
+            unallocated_pts: 0,
         };
 
         // 初期同行メンバー：オットー（ブラックスミス・支援役・後衛）
@@ -116,6 +117,7 @@ impl WorldState {
                 role: FormationRole::Backline,
                 priority_target_role: None,
             },
+            unallocated_pts: 0,
         };
 
         // ギルド名簿の初期化（最大定員10名）
@@ -136,6 +138,7 @@ impl WorldState {
             exp: 0,
             activity_score: 80,
             formation: TacticalFormation::default(),
+            unallocated_pts: 0,
         };
         let reserve2 = Character {
             id: "char_reserve_priest".to_string(),
@@ -150,6 +153,7 @@ impl WorldState {
             exp: 0,
             activity_score: 80,
             formation: TacticalFormation::default(),
+            unallocated_pts: 0,
         };
         let reserve3 = Character {
             id: "char_reserve_thief".to_string(),
@@ -164,6 +168,7 @@ impl WorldState {
             exp: 0,
             activity_score: 80,
             formation: TacticalFormation::default(),
+            unallocated_pts: 0,
         };
         roster.add_member(reserve1);
         roster.add_member(reserve2);
@@ -264,6 +269,7 @@ impl WorldState {
                 role: FormationRole::Midline,
                 priority_target_role: None,
             },
+            unallocated_pts: 0,
         });
         obsidian.roster.push(Character {
             id: "rival_obsidian_2".to_string(),
@@ -281,6 +287,7 @@ impl WorldState {
                 role: FormationRole::Frontline,
                 priority_target_role: None,
             },
+            unallocated_pts: 0,
         });
         obsidian.roster.push(Character {
             id: "rival_obsidian_3".to_string(),
@@ -298,6 +305,7 @@ impl WorldState {
                 role: FormationRole::Frontline,
                 priority_target_role: None,
             },
+            unallocated_pts: 0,
         });
         rival_guilds.push(obsidian);
 
@@ -330,6 +338,7 @@ impl WorldState {
                 role: FormationRole::Frontline,
                 priority_target_role: None,
             },
+            unallocated_pts: 0,
         });
         iron_coffin.roster.push(Character {
             id: "rival_iron_2".to_string(),
@@ -347,6 +356,7 @@ impl WorldState {
                 role: FormationRole::Frontline,
                 priority_target_role: None,
             },
+            unallocated_pts: 0,
         });
         iron_coffin.roster.push(Character {
             id: "rival_iron_3".to_string(),
@@ -364,6 +374,7 @@ impl WorldState {
                 role: FormationRole::Backline,
                 priority_target_role: None,
             },
+            unallocated_pts: 0,
         });
         rival_guilds.push(iron_coffin);
 
@@ -396,6 +407,7 @@ impl WorldState {
                 role: FormationRole::Backline,
                 priority_target_role: None,
             },
+            unallocated_pts: 0,
         });
         ash_scholars.roster.push(Character {
             id: "rival_ash_2".to_string(),
@@ -413,6 +425,7 @@ impl WorldState {
                 role: FormationRole::Midline,
                 priority_target_role: None,
             },
+            unallocated_pts: 0,
         });
         ash_scholars.roster.push(Character {
             id: "rival_ash_3".to_string(),
@@ -430,6 +443,7 @@ impl WorldState {
                 role: FormationRole::Backline,
                 priority_target_role: None,
             },
+            unallocated_pts: 0,
         });
         rival_guilds.push(ash_scholars);
 

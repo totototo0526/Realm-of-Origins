@@ -373,6 +373,8 @@ pub struct Character {
     pub activity_score: u32,
     #[serde(default)]
     pub formation: TacticalFormation,
+    #[serde(default)]
+    pub unallocated_pts: u32,
 }
 
 impl Character {
@@ -398,6 +400,7 @@ impl Character {
             exp: 0,
             activity_score: 100,
             formation: TacticalFormation::default(),
+            unallocated_pts: 0,
         }
     }
 }
