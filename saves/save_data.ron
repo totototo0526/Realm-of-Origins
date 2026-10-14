@@ -41,14 +41,14 @@
         ),
     ],
     storage_items: {
-        "coal": 60,
         "oridecon": 25,
-        "card_andre": 4,
         "iron_ore": 85,
-        "card_doppelganger": 1,
-        "red_potion": 50,
         "card_sidewinder": 2,
         "white_potion": 15,
+        "red_potion": 50,
+        "coal": 60,
+        "card_andre": 4,
+        "card_doppelganger": 1,
     },
     active_character: (
         id: "char_gen2_shadow",
@@ -340,11 +340,11 @@
                     id: "rival_obsidian_1",
                     name: "首領ダミアン",
                     job_id: "assassin",
-                    level: 45,
+                    level: 46,
                     base_stats: (
-                        str: 75,
+                        str: 77,
                         agi: 80,
-                        vit: 40,
+                        vit: 42,
                         int: 10,
                         dex: 50,
                         luk: 30,
@@ -520,11 +520,11 @@
                     id: "rival_ash_1",
                     name: "大魔導アルス",
                     job_id: "wizard",
-                    level: 47,
+                    level: 46,
                     base_stats: (
-                        str: 12,
+                        str: 10,
                         agi: 20,
-                        vit: 37,
+                        vit: 35,
                         int: 95,
                         dex: 65,
                         luk: 20,
@@ -606,34 +606,6 @@
     ],
     market: (
         items: {
-            "white_potion": (
-                id: "white_potion",
-                name: "白ポーション",
-                base_price: 120,
-                current_stock: 200,
-                target_stock: 200,
-            ),
-            "shield": (
-                id: "shield",
-                name: "カイトシールド",
-                base_price: 20000,
-                current_stock: 15,
-                target_stock: 15,
-            ),
-            "lance": (
-                id: "lance",
-                name: "パルチザン(長槍)",
-                base_price: 42000,
-                current_stock: 15,
-                target_stock: 15,
-            ),
-            "empty_bottle": (
-                id: "empty_bottle",
-                name: "空瓶",
-                base_price: 10,
-                current_stock: 500,
-                target_stock: 500,
-            ),
             "damascus": (
                 id: "damascus",
                 name: "ダマスカス短剣",
@@ -641,33 +613,12 @@
                 current_stock: 17,
                 target_stock: 20,
             ),
-            "oridecon": (
-                id: "oridecon",
-                name: "オリデオコン",
-                base_price: 8000,
-                current_stock: 47,
-                target_stock: 50,
-            ),
-            "buckler": (
-                id: "buckler",
-                name: "ミラーバックラー",
-                base_price: 18000,
+            "shield": (
+                id: "shield",
+                name: "カイトシールド",
+                base_price: 20000,
                 current_stock: 15,
                 target_stock: 15,
-            ),
-            "shadow_armor": (
-                id: "shadow_armor",
-                name: "シャドウメイル",
-                base_price: 32000,
-                current_stock: 10,
-                target_stock: 10,
-            ),
-            "iron_ore": (
-                id: "iron_ore",
-                name: "鉄鉱石",
-                base_price: 80,
-                current_stock: 612,
-                target_stock: 600,
             ),
             "coal": (
                 id: "coal",
@@ -690,12 +641,47 @@
                 current_stock: 91,
                 target_stock: 100,
             ),
+            "oridecon": (
+                id: "oridecon",
+                name: "オリデオコン",
+                base_price: 8000,
+                current_stock: 47,
+                target_stock: 50,
+            ),
+            "shadow_armor": (
+                id: "shadow_armor",
+                name: "シャドウメイル",
+                base_price: 32000,
+                current_stock: 10,
+                target_stock: 10,
+            ),
+            "lance": (
+                id: "lance",
+                name: "パルチザン(長槍)",
+                base_price: 42000,
+                current_stock: 15,
+                target_stock: 15,
+            ),
+            "white_potion": (
+                id: "white_potion",
+                name: "白ポーション",
+                base_price: 120,
+                current_stock: 200,
+                target_stock: 200,
+            ),
             "full_plate": (
                 id: "full_plate",
                 name: "重装甲フルプレート",
                 base_price: 45000,
                 current_stock: 10,
                 target_stock: 10,
+            ),
+            "buckler": (
+                id: "buckler",
+                name: "ミラーバックラー",
+                base_price: 18000,
+                current_stock: 15,
+                target_stock: 15,
             ),
             "hunter_bow": (
                 id: "hunter_bow",
@@ -704,22 +690,22 @@
                 current_stock: 15,
                 target_stock: 15,
             ),
+            "iron_ore": (
+                id: "iron_ore",
+                name: "鉄鉱石",
+                base_price: 80,
+                current_stock: 612,
+                target_stock: 600,
+            ),
+            "empty_bottle": (
+                id: "empty_bottle",
+                name: "空瓶",
+                base_price: 10,
+                current_stock: 500,
+                target_stock: 500,
+            ),
         },
         recipes: {
-            "damascus": (
-                output_item_id: "damascus",
-                output_count: 1,
-                ingredients: [
-                    (
-                        item_id: "steel",
-                        count: 3,
-                    ),
-                    (
-                        item_id: "oridecon",
-                        count: 1,
-                    ),
-                ],
-            ),
             "steel": (
                 output_item_id: "steel",
                 output_count: 1,
@@ -730,6 +716,20 @@
                     ),
                     (
                         item_id: "coal",
+                        count: 1,
+                    ),
+                ],
+            ),
+            "damascus": (
+                output_item_id: "damascus",
+                output_count: 1,
+                ingredients: [
+                    (
+                        item_id: "steel",
+                        count: 3,
+                    ),
+                    (
+                        item_id: "oridecon",
                         count: 1,
                     ),
                 ],
@@ -760,7 +760,7 @@
     ),
     active_dispatch: None,
     rival_league_logs: [
-        " ⚔\u{fe0f} [ギルドリーグ裏対決] 『灰燼の学派』が『鉄棺騎士団』との模擬戦を制しました！（勝者戦力微増）",
-        " ⚔\u{fe0f} [ギルドリーグ裏対決] 『灰燼の学派』が『鉄棺騎士団』との模擬戦を制しました！（勝者戦力微増）",
+        " ⚔\u{fe0f} [ギルドリーグ裏対決] 『黒曜の旅団』が『鉄棺騎士団』との模擬戦を制しました！（勝者戦力微増）",
+        " ⚔\u{fe0f} [ギルドリーグ裏対決] 『黒曜の旅団』が『鉄棺騎士団』との模擬戦を制しました！（勝者戦力微増）",
     ],
 )

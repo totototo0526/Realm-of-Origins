@@ -84,3 +84,14 @@
   - 空間ガンビット条件: `TargetDistanceAtLeast`, `TargetDistanceAtMost`, `EnemiesInRadius { radius, min_count }`
   - 陣形ロール (`FormationRole`: `Frontline`, `Midline`, `Backline`): 壁ナイトが狭路を塞ぎ、後方から長弓やLv1養殖キャラが安全に攻撃・経験値獲得を行う陣形構築
   - 空間GvG対抗戦（`simulate_spatial_gvg`）: 巨大石柱アリーナにおける陣形激突、A*移動、AoE・ノックバック応酬のシミュレーション
+- **リアルタイム2DクォータービューGUI ＆ ステップ実行エンジン (`src/gui.rs`, `src/engine.rs`, `Cargo.toml`)**:
+  - `macroquad = "0.4"` による1280x800解像度のインタラクティブ2Dゲーム画面
+  - 戦闘ステートマシン化: `SpatialBattleSession` と `BattleVisualEvent`（移動、ダメージ、MISS、AoE爆炎、ノックバック、ログ）による1 Tickステップ実行
+  - 2.5Dクォータービュー描画: 縦0.58倍圧縮ヘクスグリッド、建物・防壁ヘクスの立体直方体ブロック陰影描画、マウスホバー連携と射程リング展開
+  - ユニット表現: 味方（青）、敵（赤/橙）、パワーレベリング養殖対象Lv1キャラ（金色＋★マーク）、頭上ネームプレート、HPバー
+  - 視覚エフェクト: 攻撃レーザー・斬撃ライン、AoE爆炎サークル、頭上ダメージ/MISS浮遊フェードアウトテキスト
+  - RO風チャット＆システムログ: 画面左下の半透明パネルに戦闘Tick、レベルアップ、精錬結果、市場動向をスクロール表示
+  - ギルド司令部ダッシュボード: 速度制御（`一時停止`/`1x`/`3x`/`Max`）、隘路防衛＆養殖バトル開始、空間GvG対抗戦開始、クホホ精錬、市場ハック＆自動派遣、レガシー世代交代、セーブ＆ロード
+  - 日本語フォント自動探索ローダー: OS標準フォント（Linux: `ipag.ttf`, `fonts-japanese-gothic.ttf`、Windows等）を自動検出し、環境依存なく日本語を完全表示
+  - ヘッドレス互換性の厳守: `cargo test`、`--headless-demo`、`--cli` 実行時はウィンドウを開かず高速CUIとして動作
+

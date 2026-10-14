@@ -5,7 +5,7 @@ use crate::hex_grid::{AsciiUnitDisplay, HexCoord, HexMap, HexPathfinder, render_
 use crate::loader::ModDatabase;
 use crate::models::{
     Action, Character, Condition, DropItem, Effect, Element, EquipSlot, FormationRole,
-    MonsterArchetype, MonsterTemplate, Race, SpawnedMonster, Stats, Trigger,
+    MonsterArchetype, MonsterTemplate, Race, SpawnedMonster, Stats, TacticalFormation, Trigger,
 };
 use crate::refinery::Refinery;
 
@@ -47,6 +47,99 @@ pub struct Combatant {
     pub move_ticks: u32,
     pub next_move_tick: u32,
     pub attack_range: u32,
+    pub race: Race,
+    pub archetype: Option<MonsterArchetype>,
+    pub drops: Vec<DropItem>,
+    pub base_exp: u64,
+}
+
+impl Combatant {
+    pub fn new_character(
+        character: Character,
+        stats: CombatStats,
+        position: HexCoord,
+        attack_range: u32,
+        move_ticks: u32,
+    ) -> Self {
+        Self {
+            character,
+            stats,
+            next_action_tick: 0,
+            is_alive: true,
+            total_damage_dealt: 0,
+            autospell_count: 0,
+            position,
+            move_ticks,
+            next_move_tick: 0,
+            attack_range,
+            race: Race::Demihuman,
+            archetype: None,
+            drops: vec![],
+            base_exp: 0,
+        }
+    }
+
+    pub fn from_monster(m: &SpawnedMonster, pos: HexCoord) -> Self {
+        let m_aspd = 140.0 + (m.stats.agi as f32 * 0.2);
+        let interval = (((200.0 - m_aspd.min(190.0)) / 2.0).round().max(6.0)) as u32;
+        let move_ticks = ((24.0 - (m.stats.agi as f32 * 0.15)).max(7.0).round()) as u32;
+        let m_str = m.stats.str_stat as u32;
+        let atk_min = m_str + (m.stats.dex as u32 / 4);
+        let atk_max = m_str * 2 + (m.stats.str_stat as u32 / 10).pow(2);
+
+        let ch = Character {
+            id: format!("monster_{}", m.template_id),
+            name: format!("{}({})", m.name, m.archetype.name_ja()),
+            job_id: "monster".to_string(),
+            level: m.level,
+            base_stats: m.stats,
+            equipments: vec![],
+            learned_skills: vec![],
+            gambit_rules: vec![],
+            generation: 1,
+            exp: 0,
+            activity_score: 100,
+            formation: TacticalFormation::new(FormationRole::Frontline),
+        };
+
+        let c_stats = CombatStats {
+            max_hp: m.max_hp,
+            current_hp: m.current_hp,
+            effective_stats: m.stats,
+            min_atk: atk_min,
+            max_atk: atk_max,
+            matk: m.stats.int as u32 * 2,
+            hit: m.level + m.stats.dex as u32,
+            flee: m.level + m.stats.agi as u32,
+            crit: (m.stats.luk as f32 * 0.3).min(50.0),
+            aspd: m_aspd,
+            attack_interval_ticks: interval,
+            equip_def: 0,
+            vit_def: (m.stats.vit as f32 * 0.45).round() as u32,
+            weapon_atk_mult: 1.0,
+            ignore_def_damage: 0,
+            autospell_chance_mult: 1.0,
+        };
+
+        let base_exp = (m.level as u64 * 35).max(50);
+
+        Self {
+            character: ch,
+            stats: c_stats,
+            next_action_tick: 0,
+            is_alive: true,
+            total_damage_dealt: 0,
+            autospell_count: 0,
+            position: pos,
+            move_ticks,
+            next_move_tick: 0,
+            attack_range: m.attack_range,
+            race: m.race,
+            archetype: Some(m.archetype),
+            drops: m.drops.clone(),
+            base_exp,
+        }
+    }
 }
 
 /// 1回の戦闘結果
@@ -107,6 +200,602 @@ pub struct SpatialGvgResult {
     pub ascii_snapshots: Vec<String>,
     pub team_a_survivors: Vec<String>,
     pub team_b_survivors: Vec<String>,
+}
+
+/// GUI画面や描画システムへ通知する戦闘中の視覚イベント
+#[derive(Debug, Clone, PartialEq)]
+pub enum BattleVisualEvent {
+    /// ユニットが1ヘクス移動した
+    UnitMoved {
+        unit_id: String,
+        from: HexCoord,
+        to: HexCoord,
+    },
+    /// ダメージが発生した（通常攻撃または単体/範囲スキル）
+    DamageDealt {
+        attacker_id: String,
+        target_id: String,
+        target_hex: HexCoord,
+        amount: i32,
+        is_crit: bool,
+        skill_name: Option<String>,
+    },
+    /// 攻撃がミス（FLEE回避）した
+    AttackMissed {
+        attacker_id: String,
+        target_id: String,
+        target_hex: HexCoord,
+    },
+    /// 範囲攻撃（AoE）が指定ヘクス中心に発動した
+    AreaEffectTriggered {
+        center: HexCoord,
+        radius: u32,
+        skill_name: String,
+    },
+    /// ノックバックにより弾き飛ばされた
+    UnitKnockedBack {
+        unit_id: String,
+        from: HexCoord,
+        to: HexCoord,
+    },
+    /// ユニットが倒れた
+    UnitDied {
+        unit_id: String,
+        coord: HexCoord,
+    },
+    /// チャット/ログウィンドウに流すメッセージ
+    LogMessage(String),
+}
+
+/// リアルタイムGUI表示およびステップ実行のための空間戦闘セッション
+#[derive(Debug, Clone)]
+pub struct SpatialBattleSession {
+    pub map: HexMap,
+    pub name_a: String,
+    pub name_b: String,
+    pub team_a: Vec<Combatant>,
+    pub team_b: Vec<Combatant>,
+    pub current_tick: u32,
+    pub is_finished: bool,
+    pub is_victory: bool,
+    pub winner_team: Option<String>,
+    pub total_damage: u64,
+    pub logs: Vec<String>,
+    pub max_ticks: u32,
+    pub is_monster_battle: bool,
+    pub defeated_monsters: usize,
+    pub drops: Vec<DropItem>,
+    pub raw_loot_value: u32,
+    pub final_loot_value: u32,
+    pub gained_exp: u64,
+    pub overcharge_mult: f32,
+    pub snapshot_trigger_count: u32,
+    pub ascii_snapshots: Vec<String>,
+}
+
+impl SpatialBattleSession {
+    /// 新規空間戦闘セッションを生成
+    pub fn new(
+        map: HexMap,
+        team_a: Vec<Combatant>,
+        team_b: Vec<Combatant>,
+        name_a: String,
+        name_b: String,
+        overcharge_mult: f32,
+        is_monster_battle: bool,
+    ) -> Self {
+        let max_ticks = if is_monster_battle { 1200 } else { 1500 };
+        Self {
+            map,
+            name_a,
+            name_b,
+            team_a,
+            team_b,
+            current_tick: 0,
+            is_finished: false,
+            is_victory: false,
+            winner_team: None,
+            total_damage: 0,
+            logs: Vec::new(),
+            max_ticks,
+            is_monster_battle,
+            defeated_monsters: 0,
+            drops: Vec::new(),
+            raw_loot_value: 0,
+            final_loot_value: 0,
+            gained_exp: 0,
+            overcharge_mult,
+            snapshot_trigger_count: 0,
+            ascii_snapshots: Vec::new(),
+        }
+    }
+
+    /// 1 Tick分だけ戦闘を進め、そのTickで発生した視覚イベント一覧を返す
+    pub fn step_tick(&mut self, db: &ModDatabase) -> Vec<BattleVisualEvent> {
+        if self.is_finished {
+            return vec![];
+        }
+
+        self.current_tick += 1;
+        let mut rng = rand::thread_rng();
+        let mut events = Vec::new();
+
+        // 生存全ユニットの占有ヘクス集合
+        let mut occupied_hexes: HashSet<HexCoord> = HashSet::new();
+        for c in &self.team_a {
+            if c.is_alive {
+                occupied_hexes.insert(c.position);
+            }
+        }
+        for c in &self.team_b {
+            if c.is_alive {
+                occupied_hexes.insert(c.position);
+            }
+        }
+
+        // 1. Team A のターン
+        Self::process_team_turn(
+            self.current_tick,
+            &self.map,
+            &mut self.team_a,
+            &mut self.team_b,
+            &mut occupied_hexes,
+            &mut self.total_damage,
+            &mut self.logs,
+            &mut events,
+            db,
+            &mut rng,
+        );
+
+        // 2. Team B のターン
+        Self::process_team_turn(
+            self.current_tick,
+            &self.map,
+            &mut self.team_b,
+            &mut self.team_a,
+            &mut occupied_hexes,
+            &mut self.total_damage,
+            &mut self.logs,
+            &mut events,
+            db,
+            &mut rng,
+        );
+
+        // 3. 決着判定
+        let a_alive = self.team_a.iter().any(|c| c.is_alive);
+        let b_alive = self.team_b.iter().any(|c| c.is_alive);
+
+        if !b_alive {
+            self.is_finished = true;
+            self.is_victory = true;
+            self.winner_team = Some(self.name_a.clone());
+            self.defeated_monsters = self.team_b.len();
+            let msg = if self.is_monster_battle {
+                format!(
+                    "🎉 【防衛成功】侵攻モンスター群を完全撃退！ (討伐数: {}体, 経過: {} Ticks)",
+                    self.team_b.len(),
+                    self.current_tick
+                )
+            } else {
+                format!(
+                    "🏁 【空間GvG決着 (Tick {})】勝者: 『{}』！",
+                    self.current_tick, self.name_a
+                )
+            };
+            self.logs.push(msg.clone());
+            events.push(BattleVisualEvent::LogMessage(msg));
+            self.finalize_rewards(&mut rng);
+        } else if !a_alive {
+            self.is_finished = true;
+            self.is_victory = false;
+            self.winner_team = Some(self.name_b.clone());
+            let msg = if self.is_monster_battle {
+                format!("☠️ 【防衛失敗】パーティーは全滅した… (経過: {} Ticks)", self.current_tick)
+            } else {
+                format!(
+                    "🏁 【空間GvG決着 (Tick {})】勝者: 『{}』！",
+                    self.current_tick, self.name_b
+                )
+            };
+            self.logs.push(msg.clone());
+            events.push(BattleVisualEvent::LogMessage(msg));
+        } else if self.current_tick >= self.max_ticks {
+            self.is_finished = true;
+            self.is_victory = false;
+            self.winner_team = Some("時間切れ引き分け".to_string());
+            let msg = format!("⏱️ 【時間切れ引き分け】最大所要時間を超過しました (経過: {} Ticks)", self.current_tick);
+            self.logs.push(msg.clone());
+            events.push(BattleVisualEvent::LogMessage(msg));
+        }
+
+        events
+    }
+
+    /// チームごとの行動処理（移動、スキル、通常攻撃、AoE、ノックバック）
+    fn process_team_turn(
+        current_tick: u32,
+        map: &HexMap,
+        actors: &mut [Combatant],
+        targets: &mut [Combatant],
+        occupied_hexes: &mut HashSet<HexCoord>,
+        total_damage: &mut u64,
+        logs: &mut Vec<String>,
+        events: &mut Vec<BattleVisualEvent>,
+        db: &ModDatabase,
+        rng: &mut rand::rngs::ThreadRng,
+    ) {
+        for a_idx in 0..actors.len() {
+            if !actors[a_idx].is_alive {
+                continue;
+            }
+
+            // ターゲット選定（最寄りの生存敵ユニット）
+            let mut best_target_idx = None;
+            let mut min_dist = u32::MAX;
+            let priority_role = actors[a_idx].character.formation.priority_target_role;
+
+            for (t_idx, t) in targets.iter().enumerate() {
+                if t.is_alive {
+                    let dist = actors[a_idx].position.distance(t.position);
+                    let role_matched = priority_role.map_or(false, |r| t.character.formation.role == r);
+                    if role_matched && dist <= min_dist + 2 {
+                        best_target_idx = Some(t_idx);
+                        break;
+                    }
+                    if dist < min_dist {
+                        min_dist = dist;
+                        best_target_idx = Some(t_idx);
+                    }
+                }
+            }
+
+            let target_idx = match best_target_idx {
+                Some(idx) => idx,
+                None => break, // 敵が全滅している
+            };
+
+            let target_pos = targets[target_idx].position;
+            let current_dist = actors[a_idx].position.distance(target_pos);
+            let actor_id = actors[a_idx].character.id.clone();
+            let actor_name = actors[a_idx].character.name.clone();
+            let actor_pos = actors[a_idx].position;
+
+            // ガンビットルールの評価
+            let mut chosen_action = Action::NormalAttack;
+            let mut sorted_rules = actors[a_idx].character.gambit_rules.clone();
+            sorted_rules.sort_by_key(|r| r.priority);
+
+            for rule in &sorted_rules {
+                let matched = match &rule.condition {
+                    Condition::TargetArchetypeIs(arch) => targets[target_idx].archetype == Some(*arch),
+                    Condition::TargetRaceIs(race) => targets[target_idx].race == *race,
+                    Condition::SelfHpBelow(ratio) => {
+                        (actors[a_idx].stats.current_hp as f32 / actors[a_idx].stats.max_hp as f32) < *ratio
+                    }
+                    Condition::TargetVitAbove(threshold) => {
+                        (targets[target_idx].stats.effective_stats.vit as u32) >= *threshold
+                    }
+                    Condition::TargetDistanceAtLeast(dist) => current_dist >= *dist,
+                    Condition::TargetDistanceAtMost(dist) => current_dist <= *dist,
+                    Condition::EnemiesInRadius { radius, min_count } => {
+                        let nearby = targets.iter().filter(|t| {
+                            t.is_alive && t.position.distance(target_pos) <= *radius
+                        }).count();
+                        nearby >= *min_count
+                    }
+                    Condition::Always => true,
+                };
+                if matched {
+                    chosen_action = rule.action.clone();
+                    break;
+                }
+            }
+
+            // 必要射程の決定
+            let (req_range, skill_opt) = match chosen_action {
+                Action::UseActiveSkill(ref sid) => {
+                    let sk = db.skills.get(sid);
+                    let range = sk.map(|s| s.attack_range).unwrap_or(actors[a_idx].attack_range);
+                    (range, sk)
+                }
+                _ => (actors[a_idx].attack_range, None),
+            };
+
+            if current_dist > req_range {
+                // 射程外：A*で射程内へ向けて1ヘクス前進
+                if actors[a_idx].next_move_tick <= current_tick {
+                    let path = HexPathfinder::find_path_to_range(
+                        map,
+                        actors[a_idx].position,
+                        target_pos,
+                        req_range,
+                        occupied_hexes,
+                    );
+                    if let Some(steps) = path {
+                        if let Some(&next_step) = steps.first() {
+                            if !occupied_hexes.contains(&next_step) && map.is_walkable(next_step) {
+                                occupied_hexes.remove(&actors[a_idx].position);
+                                let old_pos = actors[a_idx].position;
+                                actors[a_idx].position = next_step;
+                                occupied_hexes.insert(next_step);
+                                actors[a_idx].next_move_tick = current_tick + actors[a_idx].move_ticks;
+
+                                events.push(BattleVisualEvent::UnitMoved {
+                                    unit_id: actor_id.clone(),
+                                    from: old_pos,
+                                    to: next_step,
+                                });
+                            }
+                        }
+                    }
+                }
+            } else {
+                // 射程内：攻撃またはスキル発動
+                if actors[a_idx].next_action_tick <= current_tick {
+                    let c_stats = actors[a_idx].stats.clone();
+
+                    if let Some(skill) = skill_opt {
+                        // 回復スキルの処理
+                        if let Some(heal) = skill.heal_amount {
+                            let mut lowest_idx = a_idx;
+                            let mut lowest_ratio = actors[a_idx].stats.current_hp as f32 / actors[a_idx].stats.max_hp as f32;
+                            for (idx, ally) in actors.iter().enumerate() {
+                                if ally.is_alive {
+                                    let r = ally.stats.current_hp as f32 / ally.stats.max_hp as f32;
+                                    if r < lowest_ratio {
+                                        lowest_ratio = r;
+                                        lowest_idx = idx;
+                                    }
+                                }
+                            }
+                            let target_ally_name = actors[lowest_idx].character.name.clone();
+                            let target_ally_pos = actors[lowest_idx].position;
+                            actors[lowest_idx].stats.current_hp = (actors[lowest_idx].stats.current_hp + heal as i32).min(actors[lowest_idx].stats.max_hp as i32);
+                            let log_msg = format!(
+                                "   💚 [Tick {:>4}] {} はスキル【{}】を詠唱！ 『{}』 のHPを {} 回復！",
+                                current_tick, actor_name, skill.name, target_ally_name, heal
+                            );
+                            logs.push(log_msg.clone());
+                            events.push(BattleVisualEvent::LogMessage(log_msg));
+                            events.push(BattleVisualEvent::DamageDealt {
+                                attacker_id: actor_id.clone(),
+                                target_id: actors[lowest_idx].character.id.clone(),
+                                target_hex: target_ally_pos,
+                                amount: -(heal as i32),
+                                is_crit: false,
+                                skill_name: Some(skill.name.clone()),
+                            });
+                            actors[a_idx].next_action_tick = current_tick + actors[a_idx].stats.attack_interval_ticks;
+                            continue;
+                        }
+
+                        let is_sure = skill.is_sure_hit;
+                        let mult = skill.physical_multiplier.or(skill.magic_multiplier).unwrap_or(1.5);
+                        let is_magic = skill.magic_multiplier.is_some();
+                        let is_piercing = skill.is_piercing_def;
+                        let base_power = if is_magic {
+                            c_stats.matk as f32
+                        } else {
+                            rng.gen_range(c_stats.min_atk..=c_stats.max_atk) as f32
+                        };
+
+                        // 範囲攻撃（AoE）判定
+                        let aoe_targets: Vec<usize> = if let Some(radius) = skill.aoe_radius {
+                            let aoe_hexes = HexCoord::get_hexes_in_radius(target_pos, radius);
+                            events.push(BattleVisualEvent::AreaEffectTriggered {
+                                center: target_pos,
+                                radius,
+                                skill_name: skill.name.clone(),
+                            });
+                            targets.iter().enumerate()
+                                .filter(|(_, t)| t.is_alive && aoe_hexes.contains(&t.position))
+                                .map(|(idx, _)| idx)
+                                .collect()
+                        } else {
+                            vec![target_idx]
+                        };
+
+                        let mut hit_count = 0;
+                        for &t_idx in &aoe_targets {
+                            let t = &mut targets[t_idx];
+                            let hit_rate = if is_sure || is_magic {
+                                100
+                            } else {
+                                (80 + c_stats.hit as i32 - t.stats.flee as i32).clamp(10, 95)
+                            };
+                            let hit_roll: i32 = rng.gen_range(1..=100);
+                            if hit_roll <= hit_rate {
+                                let race_mult = 1.0;
+                                let t_def = (t.stats.vit_def + t.stats.equip_def) as f32 * 0.45;
+                                let raw_dmg = if is_magic {
+                                    base_power * mult * race_mult
+                                } else if is_piercing {
+                                    let pierce_bonus = (t_def * 4.2).max(60.0);
+                                    (base_power + pierce_bonus) * race_mult
+                                } else {
+                                    (base_power * mult - t_def).max(1.0) * race_mult
+                                };
+                                let final_dmg = raw_dmg.round() as u32 + c_stats.ignore_def_damage;
+                                t.stats.current_hp -= final_dmg as i32;
+                                actors[a_idx].total_damage_dealt += final_dmg as u64;
+                                *total_damage += final_dmg as u64;
+                                hit_count += 1;
+
+                                events.push(BattleVisualEvent::DamageDealt {
+                                    attacker_id: actor_id.clone(),
+                                    target_id: t.character.id.clone(),
+                                    target_hex: t.position,
+                                    amount: final_dmg as i32,
+                                    is_crit: false,
+                                    skill_name: Some(skill.name.clone()),
+                                });
+
+                                if t.stats.current_hp <= 0 {
+                                    t.is_alive = false;
+                                    occupied_hexes.remove(&t.position);
+                                    let log_msg = format!("   💀 [Tick {:>4}] {} は倒れた！", current_tick, t.character.name);
+                                    logs.push(log_msg.clone());
+                                    events.push(BattleVisualEvent::LogMessage(log_msg));
+                                    events.push(BattleVisualEvent::UnitDied {
+                                        unit_id: t.character.id.clone(),
+                                        coord: t.position,
+                                    });
+                                }
+                            } else {
+                                events.push(BattleVisualEvent::AttackMissed {
+                                    attacker_id: actor_id.clone(),
+                                    target_id: t.character.id.clone(),
+                                    target_hex: t.position,
+                                });
+                            }
+                        }
+
+                        let log_msg = format!(
+                            "   🔥 [Tick {:>4}] {} のスキル【{}】発動！ 標的(q:{}, r:{}) 周囲 {}体に直撃！",
+                            current_tick, actor_name, skill.name, target_pos.q, target_pos.r, hit_count
+                        );
+                        logs.push(log_msg.clone());
+                        events.push(BattleVisualEvent::LogMessage(log_msg));
+
+                        // ノックバック処理
+                        if let Some(kb_dist) = skill.knockback_distance {
+                            if targets[target_idx].is_alive {
+                                let old_t_pos = targets[target_idx].position;
+                                let new_t_pos = SimulationEngine::calculate_knockback_step(
+                                    map,
+                                    old_t_pos,
+                                    actor_pos,
+                                    kb_dist,
+                                    occupied_hexes,
+                                );
+                                if new_t_pos != old_t_pos {
+                                    occupied_hexes.remove(&old_t_pos);
+                                    targets[target_idx].position = new_t_pos;
+                                    occupied_hexes.insert(new_t_pos);
+
+                                    let log_msg = format!(
+                                        "   💨 [ノックバック] {} は後方へ突き飛ばされた！ ((q:{}, r:{}) -> (q:{}, r:{}))",
+                                        targets[target_idx].character.name,
+                                        old_t_pos.q, old_t_pos.r, new_t_pos.q, new_t_pos.r
+                                    );
+                                    logs.push(log_msg.clone());
+                                    events.push(BattleVisualEvent::LogMessage(log_msg));
+                                    events.push(BattleVisualEvent::UnitKnockedBack {
+                                        unit_id: targets[target_idx].character.id.clone(),
+                                        from: old_t_pos,
+                                        to: new_t_pos,
+                                    });
+                                }
+                            }
+                        }
+                    } else {
+                        // 通常攻撃
+                        let t = &mut targets[target_idx];
+                        let is_crit = rng.gen_range(0.0..100.0) < c_stats.crit;
+                        let hit_rate = if is_crit {
+                            100
+                        } else {
+                            (80 + c_stats.hit as i32 - t.stats.flee as i32).clamp(10, 95)
+                        };
+                        let hit_roll: i32 = rng.gen_range(1..=100);
+
+                        if hit_roll <= hit_rate {
+                            let raw_atk = rng.gen_range(c_stats.min_atk..=c_stats.max_atk) as f32;
+                            let def_val = if is_crit { 0.0 } else { (t.stats.vit_def + t.stats.equip_def) as f32 * 0.45 };
+                            let final_dmg = (raw_atk - def_val).max(1.0).round() as u32 + c_stats.ignore_def_damage;
+
+                            t.stats.current_hp -= final_dmg as i32;
+                            actors[a_idx].total_damage_dealt += final_dmg as u64;
+                            *total_damage += final_dmg as u64;
+
+                            events.push(BattleVisualEvent::DamageDealt {
+                                attacker_id: actor_id.clone(),
+                                target_id: t.character.id.clone(),
+                                target_hex: t.position,
+                                amount: final_dmg as i32,
+                                is_crit,
+                                skill_name: None,
+                            });
+
+                            if t.stats.current_hp <= 0 {
+                                t.is_alive = false;
+                                occupied_hexes.remove(&t.position);
+                                let log_msg = format!("   💀 [Tick {:>4}] {} は倒れた！", current_tick, t.character.name);
+                                logs.push(log_msg.clone());
+                                events.push(BattleVisualEvent::LogMessage(log_msg));
+                                events.push(BattleVisualEvent::UnitDied {
+                                    unit_id: t.character.id.clone(),
+                                    coord: t.position,
+                                });
+                            }
+                        } else {
+                            events.push(BattleVisualEvent::AttackMissed {
+                                attacker_id: actor_id.clone(),
+                                target_id: t.character.id.clone(),
+                                target_hex: t.position,
+                            });
+                        }
+                    }
+
+                    actors[a_idx].next_action_tick = current_tick + actors[a_idx].stats.attack_interval_ticks;
+                }
+            }
+        }
+    }
+
+    /// 勝利時のドロップ品と経験値の精算
+    fn finalize_rewards(&mut self, rng: &mut rand::rngs::ThreadRng) {
+        if self.is_monster_battle && self.is_victory {
+            for m in &self.team_b {
+                for drop in &m.drops {
+                    if rng.gen::<f32>() < drop.drop_rate {
+                        self.raw_loot_value += drop.base_value;
+                        self.drops.push(drop.clone());
+                    }
+                }
+                self.gained_exp += m.base_exp;
+            }
+            self.final_loot_value = (self.raw_loot_value as f32 * self.overcharge_mult).round() as u32;
+        }
+    }
+
+    /// CUIコンソール表示用のアスキーアート盤面スナップショットを取得
+    pub fn get_ascii_snapshot(&self, highlight_hexes: Option<&HashSet<HexCoord>>) -> String {
+        let mut display_units = Vec::new();
+        for (idx, c) in self.team_a.iter().enumerate() {
+            if c.is_alive {
+                let sym = match c.character.formation.role {
+                    FormationRole::Frontline => format!("P{}", idx + 1),
+                    FormationRole::Midline => format!("M{}", idx + 1),
+                    FormationRole::Backline => format!("B{}", idx + 1),
+                };
+                display_units.push(AsciiUnitDisplay {
+                    coord: c.position,
+                    symbol: sym,
+                    is_team_a: true,
+                    current_hp: c.stats.current_hp,
+                    max_hp: c.stats.max_hp,
+                });
+            }
+        }
+        for (idx, c) in self.team_b.iter().enumerate() {
+            if c.is_alive {
+                let sym = if self.is_monster_battle {
+                    format!("E{}", idx + 1)
+                } else {
+                    format!("B{}", idx + 1)
+                };
+                display_units.push(AsciiUnitDisplay {
+                    coord: c.position,
+                    symbol: sym,
+                    is_team_a: false,
+                    current_hp: c.stats.current_hp,
+                    max_hp: c.stats.max_hp,
+                });
+            }
+        }
+        render_ascii_map(&self.map, &display_units, highlight_hexes)
+    }
 }
 
 /// 10連戦などのシミュレーション全体結果
@@ -449,18 +1138,13 @@ impl<'a> SimulationEngine<'a> {
                 let stats = self.calculate_combat_stats(ch, weapon_mult);
                 let attack_range = Self::get_character_attack_range(ch);
                 let move_ticks = Self::get_character_move_ticks(ch);
-                Combatant {
-                    character: ch.clone(),
+                Combatant::new_character(
+                    ch.clone(),
                     stats,
-                    next_action_tick: 0,
-                    is_alive: true,
-                    total_damage_dealt: 0,
-                    autospell_count: 0,
-                    position: HexCoord::new(0, 0),
-                    move_ticks,
-                    next_move_tick: 0,
+                    HexCoord::new(0, 0),
                     attack_range,
-                }
+                    move_ticks,
+                )
             })
             .collect();
 
@@ -863,18 +1547,13 @@ impl<'a> SimulationEngine<'a> {
                 let stats = self.calculate_combat_stats(ch, weapon_mult_a);
                 let attack_range = Self::get_character_attack_range(ch);
                 let move_ticks = Self::get_character_move_ticks(ch);
-                Combatant {
-                    character: ch.clone(),
+                Combatant::new_character(
+                    ch.clone(),
                     stats,
-                    next_action_tick: 0,
-                    is_alive: true,
-                    total_damage_dealt: 0,
-                    autospell_count: 0,
-                    position: HexCoord::new(0, 0),
-                    move_ticks,
-                    next_move_tick: 0,
+                    HexCoord::new(0, 0),
                     attack_range,
-                }
+                    move_ticks,
+                )
             })
             .collect();
 
@@ -884,18 +1563,13 @@ impl<'a> SimulationEngine<'a> {
                 let stats = self.calculate_combat_stats(ch, weapon_mult_b);
                 let attack_range = Self::get_character_attack_range(ch);
                 let move_ticks = Self::get_character_move_ticks(ch);
-                Combatant {
-                    character: ch.clone(),
+                Combatant::new_character(
+                    ch.clone(),
                     stats,
-                    next_action_tick: 0,
-                    is_alive: true,
-                    total_damage_dealt: 0,
-                    autospell_count: 0,
-                    position: HexCoord::new(0, 0),
-                    move_ticks,
-                    next_move_tick: 0,
+                    HexCoord::new(0, 0),
                     attack_range,
-                }
+                    move_ticks,
+                )
             })
             .collect();
 
@@ -1181,20 +1855,17 @@ impl<'a> SimulationEngine<'a> {
         curr
     }
 
-    /// 空間戦場での戦闘シミュレーション（チョークポイント防衛戦・遠距離ハラスメント・AoE・ノックバック）
-    pub fn simulate_spatial_battle(
+    /// 監視塔の隘路マップでの戦闘セッションを生成
+    pub fn create_chokepoint_session(
         &self,
-        map: &HexMap,
+        map: HexMap,
         party: &[Character],
-        monsters: &mut [SpawnedMonster],
-    ) -> SpatialBattleResult {
-        let mut rng = rand::thread_rng();
+        monsters: &[SpawnedMonster],
+    ) -> SpatialBattleSession {
         let weapon_mult = self.calculate_party_weapon_multiplier(party);
         let overcharge_mult = self.calculate_overcharge_multiplier(party);
 
-        // 1. 味方キャラクターの空間初期配置（陣形ロールに応じた配置）
-        // 隘路（q:4, r:2）を前提とした初期配置オフセット
-        let mut combatants: Vec<Combatant> = Vec::new();
+        let mut team_a: Vec<Combatant> = Vec::new();
         let mut frontline_offset = 0i32;
         let mut midline_offset = 0i32;
         let mut backline_offset = 0i32;
@@ -1222,537 +1893,171 @@ impl<'a> SimulationEngine<'a> {
                 }
             };
 
-            combatants.push(Combatant {
-                character: ch.clone(),
+            team_a.push(Combatant::new_character(
+                ch.clone(),
                 stats,
-                next_action_tick: 0,
-                is_alive: true,
-                total_damage_dealt: 0,
-                autospell_count: 0,
-                position: initial_pos,
-                move_ticks,
-                next_move_tick: 0,
+                initial_pos,
                 attack_range,
-            });
+                move_ticks,
+            ));
         }
 
-        // 2. モンスター群の空間初期配置（隘路の東側から迫る）
-        struct SpatialMonster {
-            pub monster: SpawnedMonster,
-            pub position: HexCoord,
-            pub move_ticks: u32,
-            pub next_move_tick: u32,
-            pub next_action_tick: u32,
-            pub attack_interval_ticks: u32,
-            pub is_alive: bool,
+        let mut team_b: Vec<Combatant> = Vec::new();
+        for (i, m) in monsters.iter().enumerate() {
+            let initial_pos = HexCoord::new(6 + (i as i32 / 2), 1 + (i as i32 % 3));
+            team_b.push(Combatant::from_monster(m, initial_pos));
         }
 
-        let mut spatial_monsters: Vec<SpatialMonster> = Vec::new();
-        for (idx, m) in monsters.iter().enumerate() {
-            let m_aspd = 140.0 + (m.stats.agi as f32 * 0.2);
-            let interval = (((200.0 - m_aspd.min(190.0)) / 2.0).round().max(6.0)) as u32;
-            let move_ticks = ((24.0 - (m.stats.agi as f32 * 0.15)).max(7.0).round()) as u32;
+        SpatialBattleSession::new(
+            map,
+            team_a,
+            team_b,
+            "プレイヤー防衛隊".to_string(),
+            "侵攻モンスター群".to_string(),
+            overcharge_mult,
+            true,
+        )
+    }
 
-            // 隘路の東側（q: 6..8, r: 1..3）にスポーン
-            let pos = match idx {
-                0 => HexCoord::new(6, 2), // 最前線（隘路直前）
-                1 => HexCoord::new(7, 1), // 上側から迫る
-                2 => HexCoord::new(7, 3), // 下側から迫る
-                _ => HexCoord::new(8 + (idx as i32 / 2), 2 + (idx as i32 % 2)),
+    /// GvG闘技場マップでの戦闘セッションを生成
+    pub fn create_gvg_session(
+        &self,
+        map: HexMap,
+        team_a: &[Character],
+        team_b: &[Character],
+        name_a: &str,
+        name_b: &str,
+        town_bonus_a: Option<crate::guild::TownPassiveBonus>,
+    ) -> SpatialBattleSession {
+        let town_atk_bonus = town_bonus_a.as_ref().map(|b| b.extra_weapon_atk_percent).unwrap_or(0.0);
+        let weapon_mult_a = self.calculate_party_weapon_multiplier(team_a) + town_atk_bonus;
+        let weapon_mult_b = self.calculate_party_weapon_multiplier(team_b);
+        let overcharge_mult = self.calculate_overcharge_multiplier(team_a);
+
+        // チームA（西側配置）
+        let mut frontline_offset_a = 0i32;
+        let mut midline_offset_a = 0i32;
+        let mut backline_offset_a = 0i32;
+        let mut combatants_a: Vec<Combatant> = Vec::new();
+
+        for ch in team_a {
+            let stats = self.calculate_combat_stats(ch, weapon_mult_a);
+            let attack_range = Self::get_character_attack_range(ch);
+            let move_ticks = Self::get_character_move_ticks(ch);
+
+            let initial_pos = match ch.formation.role {
+                FormationRole::Frontline => {
+                    let pos = HexCoord::new(-2, 0 + frontline_offset_a);
+                    frontline_offset_a += 1;
+                    pos
+                }
+                FormationRole::Midline => {
+                    let pos = HexCoord::new(-4, 0 + midline_offset_a);
+                    midline_offset_a += 1;
+                    pos
+                }
+                FormationRole::Backline => {
+                    let pos = HexCoord::new(-6, 0 + backline_offset_a);
+                    backline_offset_a += 1;
+                    pos
+                }
             };
 
-            spatial_monsters.push(SpatialMonster {
-                monster: m.clone(),
-                position: pos,
+            combatants_a.push(Combatant::new_character(
+                ch.clone(),
+                stats,
+                initial_pos,
+                attack_range,
                 move_ticks,
-                next_move_tick: 0,
-                next_action_tick: 0,
-                attack_interval_ticks: interval,
-                is_alive: true,
-            });
-        }
-
-        let mut logs = Vec::new();
-        let mut ascii_snapshots = Vec::new();
-        let mut current_tick = 0u32;
-        let mut total_damage = 0u64;
-        let mut snapshot_trigger_count = 0;
-
-        logs.push(format!("🛡️  【空間タクティカル防衛戦開戦】戦場: 『{}』", map.name));
-        logs.push(format!(
-            "   自軍編成: {}名 | 侵攻モンスター群: {}体",
-            combatants.len(),
-            spatial_monsters.len()
-        ));
-
-        // 開幕時アスキー盤面スナップショットの取得
-        {
-            let mut display_units = Vec::new();
-            for (idx, c) in combatants.iter().enumerate() {
-                let sym = match c.character.formation.role {
-                    FormationRole::Frontline => format!("P{}", idx + 1),
-                    FormationRole::Midline => format!("M{}", idx + 1),
-                    FormationRole::Backline => format!("B{}", idx + 1),
-                };
-                display_units.push(AsciiUnitDisplay {
-                    coord: c.position,
-                    symbol: sym,
-                    is_team_a: true,
-                    current_hp: c.stats.current_hp,
-                    max_hp: c.stats.max_hp,
-                });
-            }
-            for (idx, m) in spatial_monsters.iter().enumerate() {
-                display_units.push(AsciiUnitDisplay {
-                    coord: m.position,
-                    symbol: format!("E{}", idx + 1),
-                    is_team_a: false,
-                    current_hp: m.monster.current_hp,
-                    max_hp: m.monster.max_hp,
-                });
-            }
-            let snapshot = render_ascii_map(map, &display_units, None);
-            ascii_snapshots.push(format!("--- 【開幕時盤面 (Tick 0)】---\n{}", snapshot));
-        }
-
-        // 空間戦闘Tickループ
-        while combatants.iter().any(|c| c.is_alive)
-            && spatial_monsters.iter().any(|m| m.is_alive)
-            && current_tick < 10000
-        {
-            // 全占有ヘクスの収集（他ユニットとの衝突・迂回用）
-            let mut occupied_hexes: HashSet<HexCoord> = HashSet::new();
-            for c in &combatants {
-                if c.is_alive {
-                    occupied_hexes.insert(c.position);
-                }
-            }
-            for m in &spatial_monsters {
-                if m.is_alive {
-                    occupied_hexes.insert(m.position);
-                }
-            }
-
-            // A. 味方プレイヤー側の空間行動判定
-            for c_idx in 0..combatants.len() {
-                if !combatants[c_idx].is_alive {
-                    continue;
-                }
-
-                // 最も近いモンスターをターゲット選定
-                let mut best_m_idx = None;
-                let mut min_dist = u32::MAX;
-                for (m_idx, m) in spatial_monsters.iter().enumerate() {
-                    if m.is_alive {
-                        let dist = combatants[c_idx].position.distance(m.position);
-                        if dist < min_dist {
-                            min_dist = dist;
-                            best_m_idx = Some(m_idx);
-                        }
-                    }
-                }
-
-                let target_m_idx = match best_m_idx {
-                    Some(idx) => idx,
-                    None => break,
-                };
-
-                let target_pos = spatial_monsters[target_m_idx].position;
-                let current_dist = combatants[c_idx].position.distance(target_pos);
-                let c_char = combatants[c_idx].character.clone();
-                let c_stats = combatants[c_idx].stats.clone();
-
-                // ガンビットルールの空間評価
-                let mut chosen_action = Action::NormalAttack;
-                let mut sorted_rules = c_char.gambit_rules.clone();
-                sorted_rules.sort_by_key(|r| r.priority);
-
-                for rule in &sorted_rules {
-                    let matched = match &rule.condition {
-                        Condition::TargetArchetypeIs(arch) => spatial_monsters[target_m_idx].monster.archetype == *arch,
-                        Condition::TargetRaceIs(race) => spatial_monsters[target_m_idx].monster.race == *race,
-                        Condition::SelfHpBelow(ratio) => {
-                            (c_stats.current_hp as f32 / c_stats.max_hp as f32) < *ratio
-                        }
-                        Condition::TargetVitAbove(threshold) => {
-                            (spatial_monsters[target_m_idx].monster.stats.vit as u32) >= *threshold
-                        }
-                        Condition::TargetDistanceAtLeast(dist) => current_dist >= *dist,
-                        Condition::TargetDistanceAtMost(dist) => current_dist <= *dist,
-                        Condition::EnemiesInRadius { radius, min_count } => {
-                            let nearby = spatial_monsters.iter().filter(|m| {
-                                m.is_alive && m.position.distance(target_pos) <= *radius
-                            }).count();
-                            nearby >= *min_count
-                        }
-                        Condition::Always => true,
-                    };
-                    if matched {
-                        chosen_action = rule.action.clone();
-                        break;
-                    }
-                }
-
-                // アクションに必要な射程の判定
-                let (req_range, skill_opt) = match chosen_action {
-                    Action::UseActiveSkill(ref sid) => {
-                        let sk = self.db.skills.get(sid);
-                        let range = sk.map(|s| s.attack_range).unwrap_or(combatants[c_idx].attack_range);
-                        (range, sk)
-                    }
-                    _ => (combatants[c_idx].attack_range, None),
-                };
-
-                if current_dist > req_range {
-                    // 射程外：A*で射程内へ向けて1ヘクス前進
-                    if combatants[c_idx].next_move_tick <= current_tick {
-                        let path = HexPathfinder::find_path_to_range(
-                            map,
-                            combatants[c_idx].position,
-                            target_pos,
-                            req_range,
-                            &occupied_hexes,
-                        );
-                        if let Some(steps) = path {
-                            if let Some(&next_step) = steps.first() {
-                                if !occupied_hexes.contains(&next_step) && map.is_walkable(next_step) {
-                                    occupied_hexes.remove(&combatants[c_idx].position);
-                                    combatants[c_idx].position = next_step;
-                                    occupied_hexes.insert(next_step);
-                                    combatants[c_idx].next_move_tick = current_tick + combatants[c_idx].move_ticks;
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // 射程内：攻撃またはスキル発動
-                    if combatants[c_idx].next_action_tick <= current_tick {
-                        let attacker_pos = combatants[c_idx].position;
-
-                        if let Some(skill) = skill_opt {
-                            let is_sure = skill.is_sure_hit;
-                            let mult = skill.physical_multiplier.or(skill.magic_multiplier).unwrap_or(1.5);
-                            let is_magic = skill.magic_multiplier.is_some();
-                            let base_power = if is_magic {
-                                c_stats.matk as f32
-                            } else {
-                                rng.gen_range(c_stats.min_atk..=c_stats.max_atk) as f32
-                            };
-
-                            // AoE（範囲攻撃）判定
-                            let aoe_targets: Vec<usize> = if let Some(radius) = skill.aoe_radius {
-                                let aoe_hexes = HexCoord::get_hexes_in_radius(target_pos, radius);
-                                spatial_monsters.iter().enumerate()
-                                    .filter(|(_, m)| m.is_alive && aoe_hexes.contains(&m.position))
-                                    .map(|(idx, _)| idx)
-                                    .collect()
-                            } else {
-                                vec![target_m_idx]
-                            };
-
-                            let mut hit_count = 0;
-                            for &m_idx in &aoe_targets {
-                                let m = &mut spatial_monsters[m_idx];
-                                let hit_rate = if is_sure || is_magic {
-                                    100
-                                } else {
-                                    (80 + c_stats.hit as i32 - (m.monster.level + m.monster.stats.agi as u32) as i32).clamp(10, 95)
-                                };
-                                let hit_roll: i32 = rng.gen_range(1..=100);
-                                if hit_roll <= hit_rate {
-                                    let race_mult = self.calculate_race_damage_multiplier(&c_char, m.monster.race);
-                                    let m_def = (m.monster.stats.vit as f32) * 0.4;
-                                    let raw_dmg = if is_magic {
-                                        base_power * mult * race_mult
-                                    } else {
-                                        (base_power * mult - m_def).max(1.0) * race_mult
-                                    };
-                                    let final_dmg = raw_dmg.round() as u32 + c_stats.ignore_def_damage;
-                                    m.monster.current_hp -= final_dmg as i32;
-                                    combatants[c_idx].total_damage_dealt += final_dmg as u64;
-                                    total_damage += final_dmg as u64;
-                                    hit_count += 1;
-
-                                    if m.monster.current_hp <= 0 {
-                                        m.is_alive = false;
-                                        occupied_hexes.remove(&m.position);
-                                        logs.push(format!(
-                                            "   💥 [Tick {:>4}] {} は倒れた！",
-                                            current_tick, m.monster.name
-                                        ));
-                                    }
-                                }
-                            }
-
-                            logs.push(format!(
-                                "   🔥 [Tick {:>4}] {} のスキル【{}】発動！ 標的(q:{}, r:{}) 周囲 {}体に直撃！",
-                                current_tick, c_char.name, skill.name, target_pos.q, target_pos.r, hit_count
-                            ));
-
-                            // ノックバック処理
-                            if let Some(kb_dist) = skill.knockback_distance {
-                                if spatial_monsters[target_m_idx].is_alive {
-                                    let old_pos = spatial_monsters[target_m_idx].position;
-                                    let new_pos = Self::calculate_knockback_step(
-                                        map,
-                                        old_pos,
-                                        attacker_pos,
-                                        kb_dist,
-                                        &occupied_hexes,
-                                    );
-                                    if new_pos != old_pos {
-                                        occupied_hexes.remove(&old_pos);
-                                        spatial_monsters[target_m_idx].position = new_pos;
-                                        occupied_hexes.insert(new_pos);
-                                        logs.push(format!(
-                                            "   💨 [ノックバック] {} は後方へ突き飛ばされた！ ((q:{}, r:{}) -> (q:{}, r:{}))",
-                                            spatial_monsters[target_m_idx].monster.name,
-                                            old_pos.q, old_pos.r, new_pos.q, new_pos.r
-                                        ));
-                                    }
-                                }
-                            }
-
-                            // 大技発動時スナップショットの記録（最初の2回まで）
-                            if snapshot_trigger_count < 2 && (skill.aoe_radius.is_some() || skill.knockback_distance.is_some()) {
-                                snapshot_trigger_count += 1;
-                                let mut display_units = Vec::new();
-                                for (idx, c) in combatants.iter().enumerate() {
-                                    let sym = match c.character.formation.role {
-                                        FormationRole::Frontline => format!("P{}", idx + 1),
-                                        FormationRole::Midline => format!("M{}", idx + 1),
-                                        FormationRole::Backline => format!("B{}", idx + 1),
-                                    };
-                                    display_units.push(AsciiUnitDisplay {
-                                        coord: c.position,
-                                        symbol: sym,
-                                        is_team_a: true,
-                                        current_hp: c.stats.current_hp,
-                                        max_hp: c.stats.max_hp,
-                                    });
-                                }
-                                for (idx, m) in spatial_monsters.iter().enumerate() {
-                                    if m.is_alive {
-                                        display_units.push(AsciiUnitDisplay {
-                                            coord: m.position,
-                                            symbol: format!("E{}", idx + 1),
-                                            is_team_a: false,
-                                            current_hp: m.monster.current_hp,
-                                            max_hp: m.monster.max_hp,
-                                        });
-                                    }
-                                }
-                                let highlight = skill.aoe_radius.map(|r| {
-                                    HexCoord::get_hexes_in_radius(target_pos, r).into_iter().collect::<HashSet<_>>()
-                                });
-                                let snapshot = render_ascii_map(map, &display_units, highlight.as_ref());
-                                ascii_snapshots.push(format!(
-                                    "--- 【スキル発動局面 (Tick {})】{} の【{}】---\n{}",
-                                    current_tick, c_char.name, skill.name, snapshot
-                                ));
-                            }
-                        } else {
-                            // 通常攻撃
-                            let m = &mut spatial_monsters[target_m_idx];
-                            let hit_rate = (80 + c_stats.hit as i32 - (m.monster.level + m.monster.stats.agi as u32) as i32).clamp(10, 95);
-                            let hit_roll: i32 = rng.gen_range(1..=100);
-                            let crit_roll: f32 = rng.gen_range(0.0..100.0);
-                            let is_crit = crit_roll < (c_stats.crit - (m.monster.stats.luk as f32 * 0.15));
-
-                            if is_crit || hit_roll <= hit_rate {
-                                let base_dmg = rng.gen_range(c_stats.min_atk..=c_stats.max_atk) as f32;
-                                let race_mult = self.calculate_race_damage_multiplier(&c_char, m.monster.race);
-                                let m_def = (m.monster.stats.vit as f32) * 0.4;
-                                let raw_dmg = if is_crit {
-                                    base_dmg * race_mult * 1.4
-                                } else {
-                                    (base_dmg - m_def).max(1.0) * race_mult
-                                };
-                                let final_dmg = raw_dmg.round() as u32 + c_stats.ignore_def_damage;
-                                m.monster.current_hp -= final_dmg as i32;
-                                combatants[c_idx].total_damage_dealt += final_dmg as u64;
-                                total_damage += final_dmg as u64;
-
-                                if m.monster.current_hp <= 0 {
-                                    m.is_alive = false;
-                                    occupied_hexes.remove(&m.position);
-                                    logs.push(format!(
-                                        "   💀 [Tick {:>4}] {} は撃破された！",
-                                        current_tick, m.monster.name
-                                    ));
-                                }
-                            }
-                        }
-
-                        combatants[c_idx].next_action_tick = current_tick + c_stats.attack_interval_ticks;
-                    }
-                }
-            }
-
-            // B. モンスター側の空間行動判定
-            for m_idx in 0..spatial_monsters.len() {
-                if !spatial_monsters[m_idx].is_alive {
-                    continue;
-                }
-
-                // 最も近い味方キャラクターをターゲット
-                let mut best_c_idx = None;
-                let mut min_dist = u32::MAX;
-                for (c_idx, c) in combatants.iter().enumerate() {
-                    if c.is_alive {
-                        let dist = spatial_monsters[m_idx].position.distance(c.position);
-                        if dist < min_dist {
-                            min_dist = dist;
-                            best_c_idx = Some(c_idx);
-                        }
-                    }
-                }
-
-                let target_c_idx = match best_c_idx {
-                    Some(idx) => idx,
-                    None => break,
-                };
-
-                let target_pos = combatants[target_c_idx].position;
-                let current_dist = spatial_monsters[m_idx].position.distance(target_pos);
-                let m_range = spatial_monsters[m_idx].monster.attack_range;
-
-                if current_dist > m_range {
-                    // 射程外：A*で接近（隘路に前衛がいる場合は隘路入口で前衛に阻まれる！）
-                    if spatial_monsters[m_idx].next_move_tick <= current_tick {
-                        let path = HexPathfinder::find_path_to_range(
-                            map,
-                            spatial_monsters[m_idx].position,
-                            target_pos,
-                            m_range,
-                            &occupied_hexes,
-                        );
-                        if let Some(steps) = path {
-                            if let Some(&next_step) = steps.first() {
-                                if !occupied_hexes.contains(&next_step) && map.is_walkable(next_step) {
-                                    occupied_hexes.remove(&spatial_monsters[m_idx].position);
-                                    spatial_monsters[m_idx].position = next_step;
-                                    occupied_hexes.insert(next_step);
-                                    spatial_monsters[m_idx].next_move_tick = current_tick + spatial_monsters[m_idx].move_ticks;
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // 射程内：攻撃
-                    if spatial_monsters[m_idx].next_action_tick <= current_tick {
-                        let m = &spatial_monsters[m_idx];
-                        let target = &mut combatants[target_c_idx];
-                        let m_hit = m.monster.level + m.monster.stats.dex as u32;
-                        let hit_rate = (80 + m_hit as i32 - target.stats.flee as i32).clamp(15, 90);
-                        let roll: i32 = rng.gen_range(1..=100);
-
-                        if roll <= hit_rate {
-                            let m_str = m.monster.stats.str_stat as u32;
-                            let atk_min = m_str + (m.monster.stats.dex as u32 / 4);
-                            let atk_max = m_str * 2 + (m.monster.stats.str_stat as u32 / 10).pow(2);
-                            let raw_atk = rng.gen_range(atk_min..=atk_max) as f32;
-                            let def_val = (target.stats.vit_def + target.stats.equip_def) as f32 * 0.45;
-                            let dmg = (raw_atk - def_val).max(1.0).round() as u32;
-
-                            target.stats.current_hp -= dmg as i32;
-                            if target.stats.current_hp <= 0 {
-                                target.is_alive = false;
-                                occupied_hexes.remove(&target.position);
-                                logs.push(format!(
-                                    "   ⚠️ [Tick {:>4}] 『{}』の壁が崩壊！ 倒れた！",
-                                    current_tick, target.character.name
-                                ));
-                            }
-                        }
-
-                        spatial_monsters[m_idx].next_action_tick = current_tick + spatial_monsters[m_idx].attack_interval_ticks;
-                    }
-                }
-            }
-
-            current_tick += 1;
-        }
-
-        let is_victory = spatial_monsters.iter().all(|m| !m.is_alive);
-        let defeated_monsters = spatial_monsters.iter().filter(|m| !m.is_alive).count();
-
-        // 決着時アスキー盤面スナップショットの取得
-        {
-            let mut display_units = Vec::new();
-            for (idx, c) in combatants.iter().enumerate() {
-                if c.is_alive {
-                    let sym = match c.character.formation.role {
-                        FormationRole::Frontline => format!("P{}", idx + 1),
-                        FormationRole::Midline => format!("M{}", idx + 1),
-                        FormationRole::Backline => format!("B{}", idx + 1),
-                    };
-                    display_units.push(AsciiUnitDisplay {
-                        coord: c.position,
-                        symbol: sym,
-                        is_team_a: true,
-                        current_hp: c.stats.current_hp,
-                        max_hp: c.stats.max_hp,
-                    });
-                }
-            }
-            for (idx, m) in spatial_monsters.iter().enumerate() {
-                if m.is_alive {
-                    display_units.push(AsciiUnitDisplay {
-                        coord: m.position,
-                        symbol: format!("E{}", idx + 1),
-                        is_team_a: false,
-                        current_hp: m.monster.current_hp,
-                        max_hp: m.monster.max_hp,
-                    });
-                }
-            }
-            let snapshot = render_ascii_map(map, &display_units, None);
-            ascii_snapshots.push(format!("--- 【決着時盤面 (Tick {})】---\n{}", current_tick, snapshot));
-        }
-
-        // ドロップと経験値の精算
-        let mut drops = Vec::new();
-        let mut raw_loot_value = 0u32;
-        let mut gained_exp = 0u64;
-
-        if is_victory {
-            for m in &spatial_monsters {
-                for drop in &m.monster.drops {
-                    if rng.gen::<f32>() < drop.drop_rate {
-                        raw_loot_value += drop.base_value;
-                        drops.push(drop.clone());
-                    }
-                }
-                let base_exp = self.db.monsters.get(&m.monster.template_id).map(|mt| mt.base_exp).unwrap_or(400);
-                gained_exp += base_exp as u64;
-            }
-            logs.push(format!(
-                "🎉 【防衛成功】侵攻モンスター群を完全撃退！ (討伐数: {}体, 経過: {} Ticks)",
-                defeated_monsters, current_tick
-            ));
-        } else {
-            logs.push(format!(
-                "☠️ 【防衛失敗】パーティーは全滅した… (経過: {} Ticks)",
-                current_tick
             ));
         }
 
-        let final_loot_value = ((raw_loot_value as f32) * overcharge_mult).round() as u32;
+        // チームB（東側配置）
+        let mut frontline_offset_b = 0i32;
+        let mut midline_offset_b = 0i32;
+        let mut backline_offset_b = 0i32;
+        let mut combatants_b: Vec<Combatant> = Vec::new();
+
+        for ch in team_b {
+            let stats = self.calculate_combat_stats(ch, weapon_mult_b);
+            let attack_range = Self::get_character_attack_range(ch);
+            let move_ticks = Self::get_character_move_ticks(ch);
+
+            let initial_pos = match ch.formation.role {
+                FormationRole::Frontline => {
+                    let pos = HexCoord::new(2, 0 + frontline_offset_b);
+                    frontline_offset_b += 1;
+                    pos
+                }
+                FormationRole::Midline => {
+                    let pos = HexCoord::new(4, 0 + midline_offset_b);
+                    midline_offset_b += 1;
+                    pos
+                }
+                FormationRole::Backline => {
+                    let pos = HexCoord::new(6, 0 + backline_offset_b);
+                    backline_offset_b += 1;
+                    pos
+                }
+            };
+
+            combatants_b.push(Combatant::new_character(
+                ch.clone(),
+                stats,
+                initial_pos,
+                attack_range,
+                move_ticks,
+            ));
+        }
+
+        SpatialBattleSession::new(
+            map,
+            combatants_a,
+            combatants_b,
+            name_a.to_string(),
+            name_b.to_string(),
+            overcharge_mult,
+            false,
+        )
+    }
+
+    /// 空間戦場での戦闘シミュレーション（チョークポイント防衛戦・遠距離ハラスメント・AoE・ノックバック）
+    pub fn simulate_spatial_battle(
+        &self,
+        map: &HexMap,
+        party: &[Character],
+        monsters: &mut [SpawnedMonster],
+    ) -> SpatialBattleResult {
+        let mut session = self.create_chokepoint_session(map.clone(), party, monsters);
+        session.ascii_snapshots.push(session.get_ascii_snapshot(None));
+
+        while !session.is_finished {
+            if session.current_tick > 0 && session.current_tick % 150 == 0 {
+                session.ascii_snapshots.push(session.get_ascii_snapshot(None));
+            }
+            session.step_tick(self.db);
+        }
+
+        // 撃破されたモンスターのHPを反映
+        for (i, m) in monsters.iter_mut().enumerate() {
+            if i < session.team_b.len() {
+                m.current_hp = session.team_b[i].stats.current_hp;
+            }
+        }
 
         SpatialBattleResult {
-            map_name: map.name.clone(),
-            total_ticks: current_tick,
-            total_damage,
-            defeated_monsters,
-            drops,
-            raw_loot_value,
-            overcharge_mult,
-            final_loot_value,
-            gained_exp,
-            logs,
-            ascii_snapshots,
-            is_victory,
+            map_name: session.map.name.clone(),
+            total_ticks: session.current_tick,
+            total_damage: session.total_damage,
+            defeated_monsters: session.defeated_monsters,
+            drops: session.drops,
+            raw_loot_value: session.raw_loot_value,
+            overcharge_mult: session.overcharge_mult,
+            final_loot_value: session.final_loot_value,
+            gained_exp: session.gained_exp,
+            logs: session.logs,
+            ascii_snapshots: session.ascii_snapshots,
+            is_victory: session.is_victory,
         }
     }
 
@@ -1766,477 +2071,40 @@ impl<'a> SimulationEngine<'a> {
         name_b: &str,
         town_bonus_a: Option<crate::guild::TownPassiveBonus>,
     ) -> SpatialGvgResult {
-        let mut rng = rand::thread_rng();
-        let town_atk_bonus = town_bonus_a.as_ref().map(|b| b.extra_weapon_atk_percent).unwrap_or(0.0);
-        let weapon_mult_a = self.calculate_party_weapon_multiplier(team_a) + town_atk_bonus;
-        let weapon_mult_b = self.calculate_party_weapon_multiplier(team_b);
+        let mut session = self.create_gvg_session(map.clone(), team_a, team_b, name_a, name_b, town_bonus_a);
+        session.ascii_snapshots.push(session.get_ascii_snapshot(None));
 
-        // チームAの初期配置（西側）
-        let mut combatants_a: Vec<Combatant> = team_a
-            .iter()
-            .enumerate()
-            .map(|(idx, ch)| {
-                let stats = self.calculate_combat_stats(ch, weapon_mult_a);
-                let attack_range = Self::get_character_attack_range(ch);
-                let move_ticks = Self::get_character_move_ticks(ch);
-                let pos = match ch.formation.role {
-                    FormationRole::Frontline => HexCoord::new(1, 2 + idx as i32),
-                    FormationRole::Midline => HexCoord::new(-1, 2 + idx as i32),
-                    FormationRole::Backline => HexCoord::new(-2, 1 + idx as i32),
-                };
-                Combatant {
-                    character: ch.clone(),
-                    stats,
-                    next_action_tick: 0,
-                    is_alive: true,
-                    total_damage_dealt: 0,
-                    autospell_count: 0,
-                    position: pos,
-                    move_ticks,
-                    next_move_tick: 0,
-                    attack_range,
-                }
-            })
-            .collect();
-
-        // チームBの初期配置（東側）
-        let mut combatants_b: Vec<Combatant> = team_b
-            .iter()
-            .enumerate()
-            .map(|(idx, ch)| {
-                let stats = self.calculate_combat_stats(ch, weapon_mult_b);
-                let attack_range = Self::get_character_attack_range(ch);
-                let move_ticks = Self::get_character_move_ticks(ch);
-                let pos = match ch.formation.role {
-                    FormationRole::Frontline => HexCoord::new(6, 2 + idx as i32),
-                    FormationRole::Midline => HexCoord::new(8, 2 + idx as i32),
-                    FormationRole::Backline => HexCoord::new(9, 1 + idx as i32),
-                };
-                Combatant {
-                    character: ch.clone(),
-                    stats,
-                    next_action_tick: 0,
-                    is_alive: true,
-                    total_damage_dealt: 0,
-                    autospell_count: 0,
-                    position: pos,
-                    move_ticks,
-                    next_move_tick: 0,
-                    attack_range,
-                }
-            })
-            .collect();
-
-        let mut logs = Vec::new();
-        let mut ascii_snapshots = Vec::new();
-        logs.push(format!("🏆 【空間GvG対抗戦開戦】『{}』 VS 『{}』 (戦場: {})", name_a, name_b, map.name));
-
-        // 開幕時スナップショット
-        {
-            let mut display_units = Vec::new();
-            for (idx, c) in combatants_a.iter().enumerate() {
-                display_units.push(AsciiUnitDisplay {
-                    coord: c.position,
-                    symbol: format!("A{}", idx + 1),
-                    is_team_a: true,
-                    current_hp: c.stats.current_hp,
-                    max_hp: c.stats.max_hp,
-                });
+        while !session.is_finished {
+            if session.current_tick > 0 && session.current_tick % 200 == 0 {
+                session.ascii_snapshots.push(session.get_ascii_snapshot(None));
             }
-            for (idx, c) in combatants_b.iter().enumerate() {
-                display_units.push(AsciiUnitDisplay {
-                    coord: c.position,
-                    symbol: format!("B{}", idx + 1),
-                    is_team_a: false,
-                    current_hp: c.stats.current_hp,
-                    max_hp: c.stats.max_hp,
-                });
-            }
-            let snapshot = render_ascii_map(map, &display_units, None);
-            ascii_snapshots.push(format!("--- 【空間GvG 開幕陣形 (Tick 0)】---\n{}", snapshot));
+            session.step_tick(self.db);
         }
 
-        let mut current_tick = 0u32;
-        let mut snapshot_count = 0;
+        let team_a_survivors: Vec<String> = session.team_a.iter().filter(|c| c.is_alive).map(|c| c.character.name.clone()).collect();
+        let team_b_survivors: Vec<String> = session.team_b.iter().filter(|c| c.is_alive).map(|c| c.character.name.clone()).collect();
 
-        while combatants_a.iter().any(|c| c.is_alive)
-            && combatants_b.iter().any(|c| c.is_alive)
-            && current_tick < 15000
-        {
-            // 全占有ヘクス
-            let mut occupied: HashSet<HexCoord> = HashSet::new();
-            for c in &combatants_a {
-                if c.is_alive { occupied.insert(c.position); }
-            }
-            for c in &combatants_b {
-                if c.is_alive { occupied.insert(c.position); }
-            }
-
-            // チームAの空間行動
-            Self::process_spatial_team_turn(
-                &self,
-                map,
-                &mut combatants_a,
-                &mut combatants_b,
-                name_a,
-                name_b,
-                current_tick,
-                &mut occupied,
-                &mut rng,
-                &mut logs,
-            );
-
-            // チームBの空間行動
-            Self::process_spatial_team_turn(
-                &self,
-                map,
-                &mut combatants_b,
-                &mut combatants_a,
-                name_b,
-                name_a,
-                current_tick,
-                &mut occupied,
-                &mut rng,
-                &mut logs,
-            );
-
-            // 中盤の激突スナップショット
-            if snapshot_count == 0 && current_tick > 30 {
-                let any_close = combatants_a.iter().any(|a| {
-                    a.is_alive && combatants_b.iter().any(|b| b.is_alive && a.position.distance(b.position) <= 2)
-                });
-                if any_close {
-                    snapshot_count += 1;
-                    let mut display_units = Vec::new();
-                    for (idx, c) in combatants_a.iter().enumerate() {
-                        if c.is_alive {
-                            display_units.push(AsciiUnitDisplay {
-                                coord: c.position,
-                                symbol: format!("A{}", idx + 1),
-                                is_team_a: true,
-                                current_hp: c.stats.current_hp,
-                                max_hp: c.stats.max_hp,
-                            });
-                        }
-                    }
-                    for (idx, c) in combatants_b.iter().enumerate() {
-                        if c.is_alive {
-                            display_units.push(AsciiUnitDisplay {
-                                coord: c.position,
-                                symbol: format!("B{}", idx + 1),
-                                is_team_a: false,
-                                current_hp: c.stats.current_hp,
-                                max_hp: c.stats.max_hp,
-                            });
-                        }
-                    }
-                    let snapshot = render_ascii_map(map, &display_units, None);
-                    ascii_snapshots.push(format!("--- 【空間GvG 陣形激突局面 (Tick {})】---\n{}", current_tick, snapshot));
+        let (winner, loser) = match session.winner_team.as_deref() {
+            Some(w) if w == name_a => (name_a.to_string(), name_b.to_string()),
+            Some(w) if w == name_b => (name_b.to_string(), name_a.to_string()),
+            _ => {
+                if team_a_survivors.len() >= team_b_survivors.len() {
+                    (name_a.to_string(), name_b.to_string())
+                } else {
+                    (name_b.to_string(), name_a.to_string())
                 }
             }
-
-            current_tick += 1;
-        }
-
-        let a_alive = combatants_a.iter().any(|c| c.is_alive);
-        let b_alive = combatants_b.iter().any(|c| c.is_alive);
-
-        let (winner, loser) = if a_alive && !b_alive {
-            (name_a.to_string(), name_b.to_string())
-        } else if b_alive && !a_alive {
-            (name_b.to_string(), name_a.to_string())
-        } else {
-            ("引き分け (Time Over)".to_string(), "".to_string())
         };
 
-        // 決着時スナップショット
-        {
-            let mut display_units = Vec::new();
-            for (idx, c) in combatants_a.iter().enumerate() {
-                if c.is_alive {
-                    display_units.push(AsciiUnitDisplay {
-                        coord: c.position,
-                        symbol: format!("A{}", idx + 1),
-                        is_team_a: true,
-                        current_hp: c.stats.current_hp,
-                        max_hp: c.stats.max_hp,
-                    });
-                }
-            }
-            for (idx, c) in combatants_b.iter().enumerate() {
-                if c.is_alive {
-                    display_units.push(AsciiUnitDisplay {
-                        coord: c.position,
-                        symbol: format!("B{}", idx + 1),
-                        is_team_a: false,
-                        current_hp: c.stats.current_hp,
-                        max_hp: c.stats.max_hp,
-                    });
-                }
-            }
-            let snapshot = render_ascii_map(map, &display_units, None);
-            ascii_snapshots.push(format!("--- 【空間GvG 決着時盤面 (Tick {})】---\n{}", current_tick, snapshot));
-        }
-
-        let team_a_survivors: Vec<String> = combatants_a
-            .iter()
-            .filter(|c| c.is_alive)
-            .map(|c| format!("{} (HP: {}/{})", c.character.name, c.stats.current_hp, c.stats.max_hp))
-            .collect();
-
-        let team_b_survivors: Vec<String> = combatants_b
-            .iter()
-            .filter(|c| c.is_alive)
-            .map(|c| format!("{} (HP: {}/{})", c.character.name, c.stats.current_hp, c.stats.max_hp))
-            .collect();
-
-        logs.push(format!(
-            "\n🏁 【空間GvG決着 (Tick {})】勝者: 『{}』！",
-            current_tick, winner
-        ));
-
         SpatialGvgResult {
-            map_name: map.name.clone(),
+            map_name: session.map.name.clone(),
             winner_team: winner,
             loser_team: loser,
-            total_ticks: current_tick,
-            logs,
-            ascii_snapshots,
+            total_ticks: session.current_tick,
+            logs: session.logs,
+            ascii_snapshots: session.ascii_snapshots,
             team_a_survivors,
             team_b_survivors,
-        }
-    }
-
-    /// 空間GvGにおけるチーム1ターンの移動・攻撃処理
-    fn process_spatial_team_turn(
-        &self,
-        map: &HexMap,
-        attackers: &mut [Combatant],
-        defenders: &mut [Combatant],
-        _atk_team_name: &str,
-        def_team_name: &str,
-        current_tick: u32,
-        occupied: &mut HashSet<HexCoord>,
-        rng: &mut rand::rngs::ThreadRng,
-        logs: &mut Vec<String>,
-    ) {
-        for a_idx in 0..attackers.len() {
-            if !attackers[a_idx].is_alive {
-                continue;
-            }
-
-            // 最も近い生存敵をターゲット
-            let mut best_d_idx = None;
-            let mut min_dist = u32::MAX;
-            for (d_idx, d) in defenders.iter().enumerate() {
-                if d.is_alive {
-                    let dist = attackers[a_idx].position.distance(d.position);
-                    if dist < min_dist {
-                        min_dist = dist;
-                        best_d_idx = Some(d_idx);
-                    }
-                }
-            }
-
-            let t_idx = match best_d_idx {
-                Some(idx) => idx,
-                None => break,
-            };
-
-            let attacker_pos = attackers[a_idx].position;
-            let target_pos = defenders[t_idx].position;
-            let current_dist = attacker_pos.distance(target_pos);
-            let a_char = attackers[a_idx].character.clone();
-            let a_stats = attackers[a_idx].stats.clone();
-
-            // ガンビットルールの空間評価
-            let mut chosen_skill_id: Option<String> = None;
-            for rule in &a_char.gambit_rules {
-                let matches = match &rule.condition {
-                    Condition::SelfHpBelow(ratio) => {
-                        (a_stats.current_hp as f32 / a_stats.max_hp as f32) < *ratio
-                    }
-                    Condition::TargetVitAbove(threshold) => {
-                        (defenders[t_idx].stats.effective_stats.vit as u32) >= *threshold
-                    }
-                    Condition::TargetDistanceAtLeast(dist) => current_dist >= *dist,
-                    Condition::TargetDistanceAtMost(dist) => current_dist <= *dist,
-                    Condition::EnemiesInRadius { radius, min_count } => {
-                        let count = defenders.iter().filter(|d| d.is_alive && d.position.distance(target_pos) <= *radius).count();
-                        count >= *min_count
-                    }
-                    Condition::Always => true,
-                    _ => false,
-                };
-                if matches {
-                    if let Action::UseActiveSkill(ref sid) = rule.action {
-                        chosen_skill_id = Some(sid.clone());
-                        break;
-                    }
-                }
-            }
-
-            let req_range = if let Some(ref sid) = chosen_skill_id {
-                self.db.skills.get(sid).map(|s| s.attack_range).unwrap_or(attackers[a_idx].attack_range)
-            } else {
-                attackers[a_idx].attack_range
-            };
-
-            if current_dist > req_range {
-                // 射程外：A*で射程内へ向けて前進
-                if attackers[a_idx].next_move_tick <= current_tick {
-                    let path = HexPathfinder::find_path_to_range(
-                        map,
-                        attacker_pos,
-                        target_pos,
-                        req_range,
-                        occupied,
-                    );
-                    if let Some(steps) = path {
-                        if let Some(&next_step) = steps.first() {
-                            if !occupied.contains(&next_step) && map.is_walkable(next_step) {
-                                occupied.remove(&attacker_pos);
-                                attackers[a_idx].position = next_step;
-                                occupied.insert(next_step);
-                                attackers[a_idx].next_move_tick = current_tick + attackers[a_idx].move_ticks;
-                            }
-                        }
-                    }
-                }
-            } else {
-                // 射程内：攻撃またはスキル発動
-                if attackers[a_idx].next_action_tick <= current_tick {
-                    let target_name = defenders[t_idx].character.name.clone();
-
-                    // 回復スキルの処理
-                    if let Some(ref sid) = chosen_skill_id {
-                        if let Some(sk) = self.db.skills.get(sid) {
-                            if let Some(heal) = sk.heal_amount {
-                                let mut lowest_idx = a_idx;
-                                let mut lowest_ratio = attackers[a_idx].stats.current_hp as f32 / attackers[a_idx].stats.max_hp as f32;
-                                for (idx, ally) in attackers.iter().enumerate() {
-                                    if ally.is_alive {
-                                        let r = ally.stats.current_hp as f32 / ally.stats.max_hp as f32;
-                                        if r < lowest_ratio {
-                                            lowest_ratio = r;
-                                            lowest_idx = idx;
-                                        }
-                                    }
-                                }
-                                let target_ally_name = attackers[lowest_idx].character.name.clone();
-                                attackers[lowest_idx].stats.current_hp = (attackers[lowest_idx].stats.current_hp + heal as i32).min(attackers[lowest_idx].stats.max_hp as i32);
-                                logs.push(format!(
-                                    "   💚 [Tick {:>4}] {} はスキル【{}】を詠唱！ 『{}』 のHPを {} 回復！",
-                                    current_tick, a_char.name, sk.name, target_ally_name, heal
-                                ));
-                                attackers[a_idx].next_action_tick = current_tick + a_stats.attack_interval_ticks;
-                                continue;
-                            }
-                        }
-                    }
-
-                    let skill_ref = chosen_skill_id.as_ref().and_then(|sid| self.db.skills.get(sid));
-                    let is_sure = skill_ref.map(|s| s.is_sure_hit).unwrap_or(false);
-                    let phys_mult = skill_ref.and_then(|s| s.physical_multiplier).unwrap_or(1.0);
-                    let is_piercing = skill_ref.map(|s| s.is_piercing_def).unwrap_or(false);
-                    let is_magic = skill_ref.map(|s| s.magic_multiplier.is_some()).unwrap_or(false);
-                    let magic_mult = skill_ref.and_then(|s| s.magic_multiplier).unwrap_or(1.0);
-                    let skill_name_opt = skill_ref.map(|s| s.name.clone());
-
-                    // AoE巻き込み対象
-                    let aoe_targets: Vec<usize> = if let Some(sk) = skill_ref {
-                        if let Some(radius) = sk.aoe_radius {
-                            let aoe_hexes = HexCoord::get_hexes_in_radius(target_pos, radius);
-                            defenders.iter().enumerate()
-                                .filter(|(_, d)| d.is_alive && aoe_hexes.contains(&d.position))
-                                .map(|(idx, _)| idx)
-                                .collect()
-                        } else {
-                            vec![t_idx]
-                        }
-                    } else {
-                        vec![t_idx]
-                    };
-
-                    for &def_idx in &aoe_targets {
-                        let cur_d_stats = &defenders[def_idx].stats;
-                        let hit_rate = (80 + a_stats.hit as i32 - cur_d_stats.flee as i32).clamp(10, 95);
-                        let hit_roll: i32 = rng.gen_range(1..=100);
-                        let crit_roll: f32 = rng.gen_range(0.0..100.0);
-                        let is_crit = crit_roll < (a_stats.crit - (cur_d_stats.effective_stats.luk as f32 * 0.15));
-
-                        if is_sure || is_crit || is_magic || hit_roll <= hit_rate {
-                            let base_dmg = if is_magic {
-                                a_stats.matk as f32 * magic_mult
-                            } else {
-                                rng.gen_range(a_stats.min_atk..=a_stats.max_atk) as f32 * phys_mult
-                            };
-                            let race_mult = self.calculate_race_damage_multiplier(&a_char, Race::Demihuman);
-                            let def_val = (cur_d_stats.vit_def + cur_d_stats.equip_def) as f32 * 0.5;
-
-                            let raw_dmg = if is_magic {
-                                base_dmg * race_mult
-                            } else if is_crit {
-                                base_dmg * race_mult * 1.4
-                            } else if is_piercing {
-                                let pierce_bonus = (def_val * 4.2).max(60.0);
-                                (base_dmg + pierce_bonus) * race_mult
-                            } else {
-                                (base_dmg - def_val).max(1.0) * race_mult
-                            };
-
-                            let final_dmg = raw_dmg.round() as u32 + a_stats.ignore_def_damage;
-                            defenders[def_idx].stats.current_hp -= final_dmg as i32;
-                            attackers[a_idx].total_damage_dealt += final_dmg as u64;
-
-                            let victim_name = defenders[def_idx].character.name.clone();
-                            let action_label = skill_name_opt.as_deref().unwrap_or("通常攻撃");
-                            if final_dmg > 200 || is_sure || is_crit || is_magic {
-                                logs.push(format!(
-                                    "   ⚔️ [Tick {:>4}] {} の【{}】 -> 『{}』の {} に {} ダメージ!",
-                                    current_tick, a_char.name, action_label, def_team_name, victim_name, final_dmg
-                                ));
-                            }
-
-                            if defenders[def_idx].stats.current_hp <= 0 {
-                                defenders[def_idx].is_alive = false;
-                                occupied.remove(&defenders[def_idx].position);
-                                logs.push(format!(
-                                    "   💀 [Tick {:>4}] 『{}』の {} は倒れた！",
-                                    current_tick, def_team_name, victim_name
-                                ));
-                            }
-                        }
-                    }
-
-                    // ノックバック処理
-                    if let Some(sk) = skill_ref {
-                        if let Some(kb_dist) = sk.knockback_distance {
-                            if defenders[t_idx].is_alive {
-                                let old_pos = defenders[t_idx].position;
-                                let new_pos = Self::calculate_knockback_step(
-                                    map,
-                                    old_pos,
-                                    attacker_pos,
-                                    kb_dist,
-                                    occupied,
-                                );
-                                if new_pos != old_pos {
-                                    occupied.remove(&old_pos);
-                                    defenders[t_idx].position = new_pos;
-                                    occupied.insert(new_pos);
-                                    logs.push(format!(
-                                        "   💨 [GvGノックバック] {} は弾き飛ばされた！ ((q:{}, r:{}) -> (q:{}, r:{}))",
-                                        target_name, old_pos.q, old_pos.r, new_pos.q, new_pos.r
-                                    ));
-                                }
-                            }
-                        }
-                    }
-
-                    attackers[a_idx].next_action_tick = current_tick + a_stats.attack_interval_ticks;
-                }
-            }
         }
     }
 }

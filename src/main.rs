@@ -1,5 +1,6 @@
 mod dispatch;
 mod engine;
+mod gui;
 mod guild;
 mod hex_grid;
 mod loader;
@@ -21,14 +22,27 @@ use progression::{GrowthPlan, Progression};
 use refinery::{Refinery, WorkOrder, WorkOrderMode};
 use world::WorldState;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let db = ModDatabase::load_from_dir("mods/core")?;
-    let is_headless_demo = std::env::args().any(|arg| arg == "--headless-demo");
+fn window_conf() -> macroquad::window::Conf {
+    macroquad::window::Conf {
+        window_title: "Realm of Origins - 2.5D Hex Engine".to_string(),
+        window_width: 1280,
+        window_height: 800,
+        ..Default::default()
+    }
+}
 
-    if is_headless_demo {
+#[macroquad::main(window_conf)]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().collect();
+    let db = ModDatabase::load_from_dir("mods/core")?;
+
+    if args.iter().any(|arg| arg == "--headless-demo") {
         run_headless_demo(&db)?;
-    } else {
+    } else if args.iter().any(|arg| arg == "--cli") {
         run_interactive_mode(&db)?;
+    } else {
+        // 引数なし、または --gui 指定時は 2.5DクォータービューGUIを起動
+        gui::run_gui(db).await;
     }
 
     Ok(())
