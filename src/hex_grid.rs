@@ -315,6 +315,43 @@ impl HexMap {
 
         map
     }
+
+    /// 迎撃戦用：入り組んだ岩石と鉱山支柱が立ち並ぶ『廃坑深層』マップ
+    pub fn create_mine_depths_map() -> Self {
+        let mut map = HexMap::new("mine_depths", "廃坑深層（地下坑道）", -3, 11, -3, 8);
+
+        // 坑道の巨大岩石群
+        let boulder_1 = BuildingFootprint::new(
+            "boulder_1",
+            "崩落した巨岩",
+            ObstacleType::Rock,
+            HexCoord::new(3, -1),
+            2,
+            2,
+        );
+        let boulder_2 = BuildingFootprint::new(
+            "boulder_2",
+            "結晶鉱石の塊",
+            ObstacleType::Rock,
+            HexCoord::new(5, 4),
+            2,
+            2,
+        );
+        let support_beam = BuildingFootprint::new(
+            "support_beam",
+            "坑道支柱",
+            ObstacleType::Pillar,
+            HexCoord::new(1, 2),
+            1,
+            2,
+        );
+
+        map.add_building(boulder_1);
+        map.add_building(boulder_2);
+        map.add_building(support_beam);
+
+        map
+    }
 }
 
 /// A* 経路探索用の優先度付きキューノード
