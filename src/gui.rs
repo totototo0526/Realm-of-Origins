@@ -2278,6 +2278,7 @@ impl GuiApp {
         let mut refine_logs = Vec::new();
         let msg;
         let is_success;
+        let mut weapon_broken = false;
 
         if let Some(eq) = self.world.active_character.equipments.iter_mut().find(|e| e.slot == EquipSlot::Weapon) {
             let old_refine = eq.refine;
@@ -2297,6 +2298,7 @@ impl GuiApp {
                 }
                 Ok(false) => {
                     is_success = false;
+                    weapon_broken = true;
                     msg = format!("[!] クホホホホ…！ 過剰精錬失敗！ +{} {} は粉々に砕け散りました…！", old_refine, eq.name);
                     self.visual_effects.push(VisualEffect {
                         from_x: 0.0,
@@ -2316,6 +2318,18 @@ impl GuiApp {
         } else {
             is_success = false;
             msg = "精錬可能な武器を装備していません。".to_string();
+        }
+
+        if weapon_broken {
+            self.world.active_character.equipments.retain(|e| e.slot != EquipSlot::Weapon);
+            let c_clone = self.world.active_character.clone();
+            if let Some(ref mut session) = self.session {
+                if let Some(combatant) = session.team_a.iter_mut().find(|u| u.character.id == c_clone.id) {
+                    let engine = crate::engine::SimulationEngine::new(&self.db);
+                    combatant.stats = engine.calculate_combat_stats(&c_clone, 1.0);
+                    combatant.character = c_clone;
+                }
+            }
         }
 
         self.chat_logs.push(msg.clone());
